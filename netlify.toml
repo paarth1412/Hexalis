@@ -1,0 +1,38 @@
+# Netlify configuration for hexalis.in
+#
+# The site is pre-built static HTML — build.py runs on your machine, not on
+# Netlify — so there is no build command and nothing to install.
+
+[build]
+  publish = "."
+  command = ""
+
+# Caching. The CSS and JS URLs carry a content hash that build.py regenerates
+# whenever the file changes, so they can be cached for a year. HTML must
+# revalidate, otherwise visitors keep an old page after a deploy.
+# (These mirror the _headers file; either one alone would do the job.)
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# In Practice is offline for now. Anyone holding an old link lands on the
+# closest page instead of a 404. 302 rather than 301, so browsers don't cache
+# it and the page can come back later without fighting a stale redirect.
+[[redirects]]
+  from = "/practice"
+  to = "/model"
+  status = 302
+
+[[redirects]]
+  from = "/practice.html"
+  to = "/model"
+  status = 302
