@@ -21,7 +21,7 @@ import zipfile
 from datetime import date
 
 from urllib.parse import quote
-from content import SITE, ICONS, PILLARS, ENTERPRISE, SCENARIOS, MODES, PROCESS, CONTRAST, FAQS
+from content import ROLES, SITE, ICONS, PILLARS, ENTERPRISE, SCENARIOS, MODES, PROCESS, CONTRAST, FAQS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BY_SLUG = {p["slug"]: p for p in PILLARS}
@@ -84,6 +84,7 @@ NAVIGATION = [
     ("pillars.html", "Pillars", "pillars"),
     ("model.html", "The Model", "model"),
     ("approach.html", "Approach", "approach"),
+    ("careers.html", "Careers", "careers"),
     ("contact.html", "Contact", "contact"),
 ]
 
@@ -977,6 +978,131 @@ def page_contact():
 ''' + footer()
 
 
+def careers_mailto(role_title=""):
+    """An inquiry that arrives already labelled, so nothing has to be chased."""
+    if role_title:
+        subject = f"Inquiry \u2014 {role_title}"
+        body = (f"Hi HEXALIS,\n\nI would like to inquire about the {role_title} position "
+                f"listed on hexalis.in.\n\nName:\nCurrent location:\nExperience:\n"
+                f"Notice period:\nPortfolio / LinkedIn:\n\n(Please attach your CV.)\n")
+    else:
+        subject = "Inquiry \u2014 careers at HEXALIS"
+        body = ("Hi HEXALIS,\n\nI would like to inquire about opportunities at HEXALIS.\n\n"
+                "Name:\nRole of interest:\nCurrent location:\nExperience:\n"
+                "Portfolio / LinkedIn:\n\n(Please attach your CV.)\n")
+    return (f"mailto:{SITE['careers_email']}?subject={quote(subject, safe='')}"
+            f"&body={quote(body, safe='')}")
+
+
+def inquire_btn(role_title="", ghost=False):
+    cls = "btn btn--ghost" if ghost else "btn"
+    return (f'<a class="{cls}" href="{e(careers_mailto(role_title))}">'
+            f'<span>Inquire now</span>{ARROW}</a>')
+
+
+def page_careers():
+    roles = ""
+    for i, r in enumerate(ROLES):
+        meta = [r["type"], r["experience"], r["work_model"], r["location"]]
+        if r["extra"]:
+            meta.append(r["extra"])
+        chips = "".join(f'<span>{e(m)}</span>' for m in meta)
+
+        resp = ""
+        for item in r["responsibilities"]:
+            if isinstance(item, tuple):
+                subs = "".join(f'<li>{e(x)}</li>' for x in item[1])
+                resp += f'<li>{e(item[0])}<ul class="role__sub">{subs}</ul></li>'
+            else:
+                resp += f'<li>{e(item)}</li>'
+
+        note = (f'<p class="role__note">{e(r["note"])}</p>') if r["note"] else ""
+        tags = "".join(f'<span class="chip">{e(t)}</span>' for t in r["preferred"])
+
+        roles += f'''
+      <article class="role" id="{r['slug']}">
+        <div class="role__head">
+          <div>
+            <div class="role__n">{i + 1:02d}</div>
+            <h3>{e(r['title'])}</h3>
+          </div>
+        </div>
+        <div class="role__meta">{chips}</div>
+        <p class="role__sum">{e(r['summary'])}</p>
+        <div class="role__actions">
+          <button class="acc__btn role__more" aria-expanded="false" aria-controls="role-{r['slug']}">
+            <span class="is-closed">Know more</span><span class="is-open">Hide details</span>
+            <span class="pm" aria-hidden="true"></span>
+          </button>
+          {inquire_btn(r['title'])}
+        </div>
+        <div class="acc__panel role__detail" id="role-{r['slug']}">
+          <div class="role__detail-in">
+            <h4>The role</h4>
+            {"".join(f"<p>{e(x)}</p>" for x in r["role"])}
+            <h4>Key responsibilities</h4>
+            <ul>{resp}</ul>
+            <h4>Candidate profile</h4>
+            <ul>{"".join(f"<li>{e(x)}</li>" for x in r["profile"])}</ul>
+            {note}
+            <h4>Preferred experience</h4>
+            <p class="body-mute">{e(r["preferred_intro"])}</p>
+            <div class="chips">{tags}</div>
+            <div class="role__foot">{inquire_btn(r['title'])}</div>
+          </div>
+        </div>
+      </article>'''
+
+    return head("Careers at HEXALIS — open positions",
+                f"{len(ROLES)} open positions at HEXALIS in Gurugram, across business development, events, "
+                f"digital marketing, creative and the Founder's Office.",
+                "careers.html") + nav("careers") + f'''
+<main id="main">
+  {inner_hero("Careers", "Six pillars.<br>One team building them.",
+              "Open positions at HEXALIS.",
+              lede="HEXALIS is early enough that the person doing the work shapes how it gets done. These are the roles we are hiring for right now, all based in Gurugram. Open a role to read the full brief, or write to us directly.",
+              crumb='<span style="color:var(--cyan)">Careers</span>')}
+
+  <section class="pad">
+    <div class="shell shell--wide">
+      <div class="label-rule"><span class="label">Open positions</span><span class="num">{len(ROLES)} roles</span></div>
+      <div class="grid g-12" style="align-items:end;margin-bottom:clamp(26px,3.6vw,44px)">
+        <div class="span-7"><h2 class="t-lg" data-words>Every role here works across more than one pillar.</h2></div>
+        <div class="span-5" style="justify-self:start">
+          <p class="body-dim" style="margin-bottom:20px;max-width:40ch">Not sure which role fits? Write to us and say what you do.</p>
+          {inquire_btn(ghost=True)}
+        </div>
+      </div>
+      <div class="roles">{roles}</div>
+    </div>
+  </section>
+
+  <section class="cta pad">
+    <div class="shell shell--wide cta__in">
+      <div>
+        <div class="label-rule"><span class="label">Apply</span></div>
+        <h2 class="t-xl" data-words>Tell us what you would want to own.</h2>
+        <p class="lede" data-rise data-d="1" style="max-width:48ch;margin-top:22px">
+          Send a CV, a portfolio, or just a note about the work you want to do. Every inquiry reaches the same inbox.
+        </p>
+        <div style="margin-top:34px" data-rise data-d="2">{inquire_btn()}</div>
+      </div>
+      <div class="cta__meta" data-rise data-d="2">
+        <div>
+          <div class="label label--mute">Careers inbox</div>
+          <a class="cta__mail" href="mailto:{SITE['careers_email']}">{SITE['careers_email']}</a>
+        </div>
+        <div>
+          <div class="label label--mute">Location</div>
+          <p style="font-size:.98rem">Gurugram, Haryana</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+''' + footer()
+
+
 def page_404():
     return head("Page not found — HEXALIS", "That page does not exist.", "404.html") + nav() + f'''
 <main id="main">
@@ -1022,6 +1148,7 @@ def main():
         "approach.html": page_approach(),
         "about.html": page_about(),
         "contact.html": page_contact(),
+        "careers.html": page_careers(),
         "404.html": page_404(),
     }
     for i, p in enumerate(PILLARS):

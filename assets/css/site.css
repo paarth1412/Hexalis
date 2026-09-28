@@ -706,3 +706,41 @@ section { position: relative; }
   .wa__btn > svg:first-child { width: 26px; height: 26px; }
   .wa__n { font-size: 1rem; letter-spacing: 0; }
 }
+
+/* ---------------------------------------------------------------- careers --
+   One card per role. Only the title, the facts and a one-line summary show;
+   the full brief stays collapsed behind "Know more" (it reuses the accordion
+   behaviour already in site.js, so there is no second implementation). */
+.roles { border-top: 1px solid var(--line); }
+.role { border-bottom: 1px solid var(--line); padding: clamp(26px, 3.2vw, 44px) 0; }
+.role__n { font-family: var(--mono); font-size: .78rem; letter-spacing: .22em; color: var(--sand); margin-bottom: 10px; }
+.role h3 { font-size: clamp(1.35rem, 2.6vw, 2.05rem); letter-spacing: -.02em; max-width: 24ch; }
+.role__meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.role__meta span { font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--text-mute); border: 1px solid var(--line); padding: 6px 11px; }
+.role__sum { margin-top: 18px; color: var(--text-dim); max-width: 68ch; }
+.role__actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 24px; }
+
+/* the "Know more" toggle: same JS hook as the FAQ, different shape */
+.role__more { width: auto; justify-content: flex-start; gap: 14px; padding: 14px 20px; border: 1px solid var(--line-hard); font-family: var(--mono); font-size: .74rem; letter-spacing: .15em; text-transform: uppercase; color: var(--text); background: none; }
+.role__more:hover { border-color: var(--cyan); color: var(--cyan); }
+.role__more .pm { width: 13px; height: 13px; flex: none; }
+.role__more[aria-expanded="false"] .is-open, .role__more[aria-expanded="true"] .is-closed { display: none; }
+
+.role__detail-in { padding-top: clamp(26px, 3vw, 38px); max-width: 86ch; }
+.role__detail h4 { font-family: var(--mono); font-size: .7rem; letter-spacing: .2em; text-transform: uppercase; color: var(--cyan); margin: 30px 0 14px; font-weight: 450; }
+.role__detail h4:first-child { margin-top: 0; }
+.role__detail p { color: var(--text-dim); margin-bottom: 12px; }
+.role__detail ul { margin: 0; }
+.role__detail li { position: relative; padding-left: 22px; margin-bottom: 10px; color: var(--text-dim); font-size: .98rem; line-height: 1.6; }
+.role__detail li::before { content: ""; position: absolute; left: 0; top: .72em; width: 9px; height: 1px; background: var(--cyan-deep); }
+.role__sub { margin: 12px 0 4px; }
+.role__sub li { padding-left: 20px; color: var(--text-mute); font-size: .94rem; margin-bottom: 7px; }
+.role__sub li::before { width: 4px; height: 4px; top: .6em; background: none; border: 1px solid var(--line-hard); transform: rotate(45deg); }
+.role__note { border-left: 2px solid var(--sand); padding-left: 16px; color: var(--text); margin: 22px 0 0; font-size: .96rem; }
+.role__foot { margin-top: 32px; }
+
+@media (max-width: 700px) {
+  .role__actions { gap: 10px; }
+  .role__actions > * { width: 100%; justify-content: center; }
+  .role__more { justify-content: space-between; }
+}

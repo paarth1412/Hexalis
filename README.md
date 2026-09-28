@@ -15,6 +15,7 @@ Python 3 (which macOS already has). It deploys anywhere that can serve files.
       model.html          ← why one partner, not six vendors
       (practice.html)     ← offline for now; page_practice() kept in build.py
       approach.html       ← engagement models, principles, FAQ
+      careers.html        ← open positions (roles live in content.py ROLES)
       about.html  contact.html  404.html
       technology.html …   ← one page per pillar (six of them)
       sitemap.xml  robots.txt
@@ -134,6 +135,23 @@ redirects `/practice` and `/practice.html` to `/model` with a temporary 302, so
 old links still land somewhere sensible. The page code and its scenarios are
 untouched in `build.py` and `content.py`; to bring it back, re-add it to
 `NAVIGATION` and to the pages dict in `main()`, and delete the two redirects.
+
+## Careers page
+
+Open positions live in `ROLES` in `content.py`, taken from the hiring pack
+(`HEXALIS_Hiring_JDs_4_Roles_V1.1.pdf`, which actually carries seven roles).
+
+Each role shows only its title, the facts and a one-line `summary` until the
+visitor presses **Know more**; the full brief is collapsed behind the same
+accordion the FAQ uses, so there is no second implementation to maintain.
+**Inquire now** opens the visitor's mail app to `SITE["careers_email"]` with the
+role already in the subject line — nothing is stored on the site.
+
+- **To remove a role:** delete its block from `ROLES` and rebuild.
+- **To add one:** copy the shape of an existing block. `responsibilities`
+  accepts either a plain string or a `("heading", [sub-bullets])` tuple.
+- **To change the inbox or the message:** `SITE["careers_email"]` and
+  `careers_mailto()` in `build.py`.
 
 ## The typeface — read this before launch
 
