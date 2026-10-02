@@ -73,8 +73,21 @@ ARROW = ('<svg class="arw" width="15" height="10" viewBox="0 0 15 10" fill="none
 LOGO_VIEWBOX = "0 0 91.77 100.0"
 LOGO_PATH = ("M48.01 0L50.32 0.19L52.64 0.83L61.05 5.37L61.05 43.57L32.56 43.57L32.47 27.29L19.24 34.6L19.24 86.22L19.06 86.22L8.51 80.2L5.27 77.98L2.5 75.02L1.39 73.27L0.46 71.14L0 68.83L0.09 33.67L0.28 31.54L0.83 29.32L2.78 25.81L4.07 24.33L6.48 22.39L42.18 1.67L44.68 0.56ZM72.25 14.34L82.33 20.35L86.68 23.31L88.34 24.98L89.64 26.73L91.21 30.25L91.67 33.02L91.77 57.82L91.67 68.73L90.93 72.25L89.82 74.47L88.9 75.76L86.22 78.26L50.97 98.61L49.21 99.44L46.25 100L44.5 99.91L42.37 99.35L32.47 93.8L32.47 57.08L61.05 56.98L61.05 73.17L72.16 66.98Z")
 
-MARK = (f'<svg class="brand__mark" viewBox="{LOGO_VIEWBOX}" aria-hidden="true">'
-        f'<path d="{LOGO_PATH}" fill="currentColor"/></svg>')
+# The logo is two interlocking pieces. They are kept as separate paths, each
+# in its own <g>, so the load animation (on the path) and the pointer drift
+# (on the group) never fight over the same transform.
+PIECE_A, PIECE_B = LOGO_PATH.split("ZM")
+PIECE_A, PIECE_B = PIECE_A + "Z", "M" + PIECE_B
+
+
+def mark(cls="brand__mark"):
+    c = f' class="{cls}"' if cls else ""
+    return (f'<svg{c} viewBox="{LOGO_VIEWBOX}" aria-hidden="true">'
+            f'<g class="pw pw--a"><path class="pc pc--a" d="{PIECE_A}"/></g>'
+            f'<g class="pw pw--b"><path class="pc pc--b" d="{PIECE_B}"/></g></svg>')
+
+
+MARK = mark()
 
 CANVAS = '<canvas class="js-lattice hero__canvas" aria-hidden="true"></canvas>'
 
@@ -207,40 +220,44 @@ def head(title, desc, path, extra=""):
 <title>{e(title)}</title>
 <meta name="description" content="{e(desc)}">
 <link rel="canonical" href="{canonical}">
-<meta name="theme-color" content="#03080a">
+<meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HEXALIS">
 <meta property="og:title" content="{e(title)}">
 <meta property="og:description" content="{e(desc)}">
 <meta property="og:url" content="{canonical}">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="/assets/img/favicon-96.png" type="image/png" sizes="96x96">
+<link rel="icon" href="/assets/img/favicon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/assets/fonts/texgyreheros-bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/texgyreheros-regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="{asset("/assets/css/site.css")}">
 <script>/* enables the reveal styles, plus a failsafe that shows the page even if site.js never loads */
 document.documentElement.className+=" js is-entering";setTimeout(function(){{document.documentElement.classList.remove("is-entering")}},900);</script>
 {extra}</head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<div class="progress" aria-hidden="true"></div>
 '''
 
 
 def nav(current=""):
     mega_items = "".join(f'''
       <a class="mega__item" href="/{p['slug']}.html">
-        <div class="n">{p['num']}</div>
+        <div class="n">Pillar {p['num']}</div>
         <h4>{e(p['name'])}</h4>
         <p>{e(p['tagline'])}</p>
       </a>''' for p in PILLARS)
 
+    # Contact lives in the button on the right, so it is not repeated as a link.
     links = "".join(
         f'<a class="nav__link{" is-current" if current == key else ""}" href="/{f}"'
         + (' data-mega-trigger aria-expanded="false" aria-controls="mega"' if key == "pillars" else "")
         + f'>{e(label)}</a>'
-        for f, label, key in NAVIGATION)
+        for f, label, key in NAVIGATION if key != "contact")
 
     drawer_items = "".join(
         f'<a href="/{p["slug"]}.html"><span class="n">{p["num"]}</span>{e(p["name"])}</a>' for p in PILLARS)
@@ -250,7 +267,7 @@ def nav(current=""):
   <div class="shell shell--wide nav__in">
     <a class="brand" href="/" aria-label="HEXALIS — home">{MARK}<span class="brand__type">HEXALIS</span></a>
     <nav class="nav__links" aria-label="Primary">{links}</nav>
-    <a class="nav__cta" href="/contact.html">Start a conversation</a>
+    <a class="nav__cta" href="/contact.html"><span>Contact us</span>{ARROW}</a>
     <button class="burger" aria-label="Menu" aria-expanded="false" aria-controls="drawer">
       <span></span><span></span><span></span>
     </button>
@@ -260,7 +277,7 @@ def nav(current=""):
   <div class="shell shell--wide">
     <div class="mega__grid">{mega_items}</div>
     <div class="mega__foot">
-      <span class="label label--mute">Six pillars · {N_STREAMS} workstreams · one accountable team</span>
+      <span class="label">Six pillars · {N_STREAMS} workstreams · one accountable team</span>
       <a class="tlink" href="/pillars.html">All six, side by side {ARROW}</a>
     </div>
   </div>
@@ -280,9 +297,9 @@ def footer():
   <div class="shell shell--wide">
     <div class="foot__top">
       <div>
-        <div class="foot__mark">{MARK.replace('class="brand__mark"', '')}<span class="brand__type">HEXALIS</span></div>
-        <p class="body-mute" style="max-width:32ch">{e(SITE['tagline'])}</p>
-        <a class="cta__mail" style="display:inline-block;margin-top:16px;font-size:1.1rem" href="mailto:{SITE['email']}">{SITE['email']}</a>
+        <div class="foot__mark">{mark("")}<span class="brand__type">HEXALIS</span></div>
+        <p class="foot__line">{e(SITE['tagline'])}</p>
+        <a class="cta__mail" href="mailto:{SITE['email']}">{SITE['email']}</a>
       </div>
       <div><h5>Pillars</h5><ul>{pill_links}</ul></div>
       <div><h5>Company</h5><ul>{co_links}</ul></div>
@@ -293,6 +310,7 @@ def footer():
       <span>{SITE['domain']}</span>
     </div>
   </div>
+  <div class="foot__giant" aria-hidden="true">HEXALIS</div>
 </footer>
 <script src="{asset("/assets/js/site.js")}" defer></script>
 </body>
@@ -302,12 +320,16 @@ def footer():
 # ---------------------------------------------------------------------------
 # Reusable sections
 # ---------------------------------------------------------------------------
-def inner_hero(kicker, title, tagline, lede="", crumb="", ico="", kick="", extra_class=""):
+def inner_hero(kicker, title, tagline, lede="", crumb="", ico="", kick="", extra_class="", art=""):
     crumbs = ""
     if crumb:
-        crumbs = (f'<div class="crumbs" style="margin-bottom:26px"><a href="/">HEXALIS</a>'
+        crumbs = (f'<div class="crumbs"><a href="/">HEXALIS</a>'
                   f'<span>/</span>{crumb}</div>')
-    right = f'<div class="phero__ico" aria-hidden="true">{icon(ico)}</div>' if ico else ""
+    if ico:
+        art = f'<div class="phero__art" aria-hidden="true"><div class="phero__ico">{icon(ico)}</div></div>'
+    else:
+        variant = f" bigmark--{art}" if art else ""
+        art = f'<div class="phero__art" aria-hidden="true"><div class="bigmark{variant}">{mark("")}</div></div>'
     kick_html = f'<div class="phero__kick">{e(kick)}</div>' if kick else ""
     lede_html = f'<p class="lede phero__purpose">{lede}</p>' if lede else ""
     return f'''<section class="phero {extra_class}">
@@ -316,14 +338,14 @@ def inner_hero(kicker, title, tagline, lede="", crumb="", ico="", kick="", extra
       {crumbs}
       <div class="phero__in">
         <div>
-          <div class="phero__num">{e(kicker)}</div>
+          <p class="eyebrow">{e(kicker)}</p>
           <h1 data-words>{title}</h1>
           <p class="phero__tag">{e(tagline)}</p>
           {kick_html}
+          {lede_html}
         </div>
-        {right}
+        {art}
       </div>
-      {lede_html}
     </div>
   </section>'''
 
@@ -365,9 +387,38 @@ def sec_doors(items):
     return f'<div class="doors">{cells}</div>'
 
 
-def sec_ticker():
-    items = "".join(f"<span>{e(s[0])}</span>" for p in PILLARS for s in p["streams"])
-    return f'<div class="ticker" aria-hidden="true"><div class="ticker__in">{items}{items}</div></div>'
+def sec_story():
+    """The six pillars, one at a time. Stacked cards without JS or on small
+    screens; on desktop site.js pins the section and scroll picks the slide."""
+    slides = "".join(f'''
+        <article class="story__slide{' is-active' if i == 0 else ''}" data-i="{i}">
+          <div class="story__copy">
+            <p class="story__num">Pillar {p['num']} of 06</p>
+            <h3>{e(p['name'])}</h3>
+            <p class="story__tag">{e(p['tagline'])}</p>
+            <p class="story__body">{e(p['core'])}</p>
+            <a class="tlink" href="/{p['slug']}.html">Explore {e(p['name'].lower())} {ARROW}</a>
+          </div>
+          <div class="story__art" aria-hidden="true"><div class="tile">{icon(p['icon'])}</div></div>
+        </article>''' for i, p in enumerate(PILLARS))
+    tabs = "".join(
+        f'<button type="button" data-go="{i}"' + (' class="is-active"' if i == 0 else '') + f'><i></i>{e(p["name"])}</button>'
+        for i, p in enumerate(PILLARS))
+    return f'''<section class="story" id="six">
+    <div class="story__pin">
+      <div class="shell shell--wide">
+        <div class="story__head">
+          <div>
+            <p class="eyebrow">The six pillars</p>
+            <h2 class="t-lg" data-words>Six sides of one business.</h2>
+          </div>
+          <a class="tlink" href="/pillars.html">All six, side by side {ARROW}</a>
+        </div>
+        <div class="story__slides">{slides}</div>
+        <nav class="story__nav" aria-label="Jump to a pillar">{tabs}</nav>
+      </div>
+    </div>
+  </section>'''
 
 
 def sec_modes():
@@ -410,24 +461,18 @@ def sec_scenarios():
 
 def cta_band(title="Bring us the part of the business that is not working.",
              body="One conversation, no deck. If HEXALIS is not the right answer, we will tell you that too."):
-    return f'''<section class="cta pad">
-  <div class="shell shell--wide cta__in">
-    <div>
-      <div class="label-rule"><span class="label">Start here</span></div>
-      <h2 class="t-xl" data-words>{e(title)}</h2>
-      <p class="lede" data-rise data-d="1" style="max-width:46ch;margin-top:22px">{e(body)}</p>
-      <div style="margin-top:34px" data-rise data-d="2">
+    return f'''<section class="cta">
+  <div class="shell shell--wide">
+    <div class="cta__card">
+      {mark("cta__mark")}
+      <div>
+        <p class="eyebrow">Start here</p>
+        <h2 class="t-xl" data-words>{e(title)}</h2>
+      </div>
+      <div data-rise data-d="1">
+        <p>{e(body)}</p>
         <a class="btn" href="/contact.html"><span>Start a conversation</span>{ARROW}</a>
-      </div>
-    </div>
-    <div class="cta__meta" data-rise data-d="2">
-      <div>
-        <div class="label label--mute">Write to us</div>
-        <a class="cta__mail" href="mailto:{SITE['email']}">{SITE['email']}</a>
-      </div>
-      <div>
-        <div class="label label--mute">Follow</div>
-        <p style="margin-top:8px"><a class="tlink" href="{SITE['instagram']}" target="_blank" rel="noopener">Instagram {ARROW}</a></p>
+        <p class="cta__alt">Or write to <a href="mailto:{SITE['email']}">{SITE['email']}</a></p>
       </div>
     </div>
   </div>
@@ -442,6 +487,7 @@ def page_index():
 {"@context":"https://schema.org","@type":"Organization","name":"HEXALIS","url":"https://hexalis.in",
 "slogan":"Empowering Business. Enabling Possibilities.","email":"ContactUs@hexalis.in",
 "description":"A six-pillar enterprise delivering technology, strategy, growth, engagement, workplace and commerce solutions from one accountable team.",
+"logo":"https://hexalis.in/assets/img/icon-512.png",
 "sameAs":["https://www.instagram.com/hexalis.in","https://www.threads.com/@hexalis.in"]}
 </script>
 '''
@@ -465,51 +511,43 @@ def page_index():
 
   <section class="hero">
     {CANVAS}
-    <div class="shell shell--wide hero__in" data-par="0.1">
-      <div class="hero__eyebrow"><span class="label">{e(SITE['tagline'])}</span></div>
-      <h1 class="t-hero">
-        <span class="ln reveal-line"><span>One partner.</span></span>
-        <span class="ln reveal-line"><span>Every <span class="accent">side</span> of</span></span>
-        <span class="ln reveal-line"><span>your business.</span></span>
-      </h1>
-      <p class="lede hero__lede" data-rise data-d="3">
-        HEXALIS is a six-pillar enterprise. Technology, strategy, brand growth, experiences,
-        workplace and commerce — arriving from one accountable team, not six vendors who have
-        never met each other.
-      </p>
-      <div class="hero__foot">
-        <div class="hero__stats" data-rise data-d="4">
-          <div class="stat"><span class="n" data-count="6">06</span><span class="k">Pillars</span></div>
-          <div class="stat"><span class="n" data-count="{N_STREAMS}">{N_STREAMS}</span><span class="k">Workstreams</span></div>
-          <div class="stat"><span class="n" data-count="1">01</span><span class="k">Point of accountability</span></div>
+    <div class="shell shell--wide hero__in">
+      <div class="hero__copy">
+        <p class="eyebrow">{e(SITE['tagline'])}</p>
+        <h1 class="t-hero" data-words>One partner. Every side of your business.</h1>
+        <p class="lede" data-rise data-d="2">
+          HEXALIS is a six-pillar enterprise. Technology, strategy, brand growth, experiences,
+          workplace and commerce — arriving from one accountable team, not six vendors who have
+          never met each other.
+        </p>
+        <div class="hero__ctas" data-rise data-d="3">
+          <a class="btn" href="/contact.html"><span>Start a conversation</span>{ARROW}</a>
+          <a class="btn btn--ghost" href="/pillars.html"><span>See the six pillars</span></a>
         </div>
-        <div class="scrollcue" aria-hidden="true"><i></i>Begin</div>
+      </div>
+      <div class="hero__art" aria-hidden="true"><div class="bigmark">{mark("")}</div></div>
+    </div>
+    <div class="shell shell--wide hero__bar">
+      <div class="hero__stats" data-rise>
+        <div class="stat"><span class="n" data-count="6">06</span><span class="k">Pillars</span></div>
+        <div class="stat"><span class="n" data-count="{N_STREAMS}">{N_STREAMS}</span><span class="k">Workstreams</span></div>
+        <div class="stat"><span class="n" data-count="1">01</span><span class="k">Point of accountability</span></div>
+      </div>
+      <div class="iwant" data-rise data-d="1">
+        <p>I want to…</p>
+        <a href="#six">Explore the six pillars {ARROW}</a>
+        <a href="/model.html">Understand the model {ARROW}</a>
+        <a href="/careers.html">Join the team {ARROW}</a>
       </div>
     </div>
   </section>
 
-  {sec_ticker()}
+  {sec_story()}
 
-  <section class="pad">
-    <div class="gridlines" aria-hidden="true"></div>
-    <div class="shell shell--wide above">
-      <div class="label-rule"><span class="label">The six pillars</span><span class="num">{N_STREAMS} workstreams</span></div>
-      <div class="grid g-12" style="align-items:end;margin-bottom:clamp(28px,4vw,48px)">
-        <div class="span-7"><h2 class="t-xl" data-words>Six sides of one business.</h2></div>
-        <div class="span-5"><p class="lede" data-rise data-d="1">
-          Each stands on its own. Together they cover the whole surface of what a modern
-          organization has to buy.</p></div>
-      </div>
-      {sec_strip()}
-      <div style="margin-top:clamp(30px,4vw,44px)" data-rise data-d="1">
-        <a class="tlink" href="/pillars.html">All six, side by side {ARROW}</a>
-      </div>
-    </div>
-  </section>
-
-  <section class="pad-b">
+  <section class="pad band">
+    <div class="wm" aria-hidden="true">Hex</div>
     <div class="shell shell--wide">
-      <div class="label-rule"><span class="label">Where to go next</span></div>
+      <h2 class="t-xl" data-words style="margin-bottom:clamp(32px,4.6vw,60px)">Where to go next.</h2>
       {doors}
     </div>
   </section>
@@ -530,7 +568,7 @@ def page_pillars():
               crumb='<span style="color:var(--cyan)">Pillars</span>')}
 
   <section class="pad">
-    <div class="gridlines" aria-hidden="true"></div>
+    <div class="wm" aria-hidden="true">Six</div>
     <div class="shell shell--wide above">
       <div class="wheel-wrap" data-rise>
         {hexwheel()}
@@ -562,9 +600,10 @@ def page_model():
 <main id="main">
   {inner_hero("The Model", "Most companies buy capability in fragments.", "Six suppliers. Six briefs. Six versions of your brand.",
               lede="It is not that any one of them is bad. It is that nobody owns the whole — and the gaps between vendors are exactly where budgets, timelines and brand consistency go to die.",
-              crumb='<span style="color:var(--cyan)">The Model</span>')}
+              crumb='<span style="color:var(--cyan)">The Model</span>', art="split")}
 
   <section class="paper pad">
+    <div class="wm" aria-hidden="true">One</div>
     <div class="shell shell--wide">
       <div class="label-rule"><span class="label">The comparison</span></div>
       <div class="compare" data-rise>
@@ -732,6 +771,7 @@ def page_about():
               crumb='<span style="color:var(--cyan)">About</span>')}
 
   <section class="paper pad">
+    <div class="wm" aria-hidden="true">Hex</div>
     <div class="shell shell--wide">
       <div class="label-rule"><span class="label">The name</span></div>
       <div class="grid g-12" style="align-items:start">
@@ -807,7 +847,7 @@ def page_pillar(p, prev_p, next_p):
         p["core"], f"{p['slug']}.html"
     ) + nav("pillars") + f'''
 <main id="main">
-  {inner_hero(f"Pillar {p['num']} — {p['outcome']}", e(p['name'].upper()), p['tagline'],
+  {inner_hero(f"Pillar {p['num']} — {p['outcome']}", e(p['name']), p['tagline'],
               lede=e(p['purpose']), crumb=crumb, ico=p['icon'], kick=p['kicker'])}
 
   <section class="pad">
@@ -888,7 +928,7 @@ def page_contact():
                 "contact.html") + nav("contact") + f'''
 <main id="main">
   {inner_hero("Start a Conversation", "Tell us what is<br>in the way.", "Thirty minutes. No deck.",
-              crumb='<span style="color:var(--cyan)">Contact</span>')}
+              crumb='<span style="color:var(--cyan)">Contact</span>', art="blue")}
 
   <section class="pad">
     <div class="shell shell--wide">
@@ -979,25 +1019,30 @@ def page_contact():
 
 
 def careers_mailto(role_title=""):
-    """An inquiry that arrives already labelled, so nothing has to be chased."""
+    """An application that arrives already labelled, so nothing has to be chased."""
     if role_title:
-        subject = f"Inquiry \u2014 {role_title}"
-        body = (f"Hi HEXALIS,\n\nI would like to inquire about the {role_title} position "
-                f"listed on hexalis.in.\n\nName:\nCurrent location:\nExperience:\n"
-                f"Notice period:\nPortfolio / LinkedIn:\n\n(Please attach your CV.)\n")
+        subject = f"Application \u2014 {role_title}"
+        body = (f"Hi Hexalis Team,\n\n"
+                f"I would like to apply for the {role_title} position listed on hexalis.in\n\n"
+                f"Name:\nContact No.:\nCurrent Location:\nExperience:\nNotice Period:\n"
+                f"Portfolio / LinkedIn:\n\n(Please attach your CV)\n")
     else:
-        subject = "Inquiry \u2014 careers at HEXALIS"
-        body = ("Hi HEXALIS,\n\nI would like to inquire about opportunities at HEXALIS.\n\n"
-                "Name:\nRole of interest:\nCurrent location:\nExperience:\n"
-                "Portfolio / LinkedIn:\n\n(Please attach your CV.)\n")
+        subject = "Application \u2014 careers at HEXALIS"
+        body = ("Hi Hexalis Team,\n\n"
+                "I would like to apply for a role at HEXALIS, listed on hexalis.in\n\n"
+                "Name:\nContact No.:\nRole of Interest:\nCurrent Location:\nExperience:\n"
+                "Notice Period:\nPortfolio / LinkedIn:\n\n(Please attach your CV)\n")
     return (f"mailto:{SITE['careers_email']}?subject={quote(subject, safe='')}"
             f"&body={quote(body, safe='')}")
 
 
-def inquire_btn(role_title="", ghost=False):
+def apply_btn(role_title="", ghost=False):
+    """Role buttons say "Apply now"; the two general ones ask for a CV instead,
+    since there is no specific role to apply to there."""
     cls = "btn btn--ghost" if ghost else "btn"
+    label = "Apply now" if role_title else "Send us your CV"
     return (f'<a class="{cls}" href="{e(careers_mailto(role_title))}">'
-            f'<span>Inquire now</span>{ARROW}</a>')
+            f'<span>{label}</span>{ARROW}</a>')
 
 
 def page_careers():
@@ -1034,7 +1079,7 @@ def page_careers():
             <span class="is-closed">Know more</span><span class="is-open">Hide details</span>
             <span class="pm" aria-hidden="true"></span>
           </button>
-          {inquire_btn(r['title'])}
+          {apply_btn(r['title'])}
         </div>
         <div class="acc__panel role__detail" id="role-{r['slug']}">
           <div class="role__detail-in">
@@ -1048,7 +1093,7 @@ def page_careers():
             <h4>Preferred experience</h4>
             <p class="body-mute">{e(r["preferred_intro"])}</p>
             <div class="chips">{tags}</div>
-            <div class="role__foot">{inquire_btn(r['title'])}</div>
+            <div class="role__foot">{apply_btn(r['title'])}</div>
           </div>
         </div>
       </article>'''
@@ -1061,7 +1106,7 @@ def page_careers():
   {inner_hero("Careers", "Six pillars.<br>One team building them.",
               "Open positions at HEXALIS.",
               lede="HEXALIS is early enough that the person doing the work shapes how it gets done. These are the roles we are hiring for right now, all based in Gurugram. Open a role to read the full brief, or write to us directly.",
-              crumb='<span style="color:var(--cyan)">Careers</span>')}
+              crumb='<span style="color:var(--cyan)">Careers</span>', art="blue")}
 
   <section class="pad">
     <div class="shell shell--wide">
@@ -1070,7 +1115,7 @@ def page_careers():
         <div class="span-7"><h2 class="t-lg" data-words>Every role here works across more than one pillar.</h2></div>
         <div class="span-5" style="justify-self:start">
           <p class="body-dim" style="margin-bottom:20px;max-width:40ch">Not sure which role fits? Write to us and say what you do.</p>
-          {inquire_btn(ghost=True)}
+          {apply_btn(ghost=True)}
         </div>
       </div>
       <div class="roles">{roles}</div>
@@ -1085,7 +1130,7 @@ def page_careers():
         <p class="lede" data-rise data-d="1" style="max-width:48ch;margin-top:22px">
           Send a CV, a portfolio, or just a note about the work you want to do. Every inquiry reaches the same inbox.
         </p>
-        <div style="margin-top:34px" data-rise data-d="2">{inquire_btn()}</div>
+        <div style="margin-top:34px" data-rise data-d="2">{apply_btn()}</div>
       </div>
       <div class="cta__meta" data-rise data-d="2">
         <div>
@@ -1123,11 +1168,22 @@ def page_404():
 # Extras
 # ---------------------------------------------------------------------------
 def favicon():
-    """The mark on the site's own ground, so the tab icon matches the header."""
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">'
-            f'<rect width="120" height="120" rx="16" fill="#03080a"/>'
-            f'<g transform="translate(23.1 10) scale(0.8)">'
-            f'<path d="{LOGO_PATH}" fill="#4fe4f2"/></g></svg>')
+    """The exact logo, transparent, on a square canvas with the same 4% margin
+    as the PNG icons that make_icons.py cuts from the original artwork."""
+    side = 100 / 0.92
+    x, y = -(side - 91.77) / 2, -(side - 100) / 2
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x:.2f} {y:.2f} {side:.2f} {side:.2f}">'
+            f'<path fill="#03abb4" d="{LOGO_PATH}"/></svg>')
+
+
+def manifest():
+    import json
+    icons = [{"src": f"/assets/img/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png"} for n in (192, 512)]
+    icons += [{"src": f"/assets/img/icon-maskable-{n}.png", "sizes": f"{n}x{n}", "type": "image/png",
+               "purpose": "maskable"} for n in (192, 512)]
+    return json.dumps({"name": "HEXALIS", "short_name": "HEXALIS", "start_url": "/",
+                       "display": "standalone", "theme_color": "#ffffff",
+                       "background_color": "#ffffff", "icons": icons}, indent=2)
 
 
 def sitemap(pages):
@@ -1162,6 +1218,8 @@ def main():
 
     with open(os.path.join(HERE, "assets/img/favicon.svg"), "w", encoding="utf-8") as f:
         f.write(favicon())
+    with open(os.path.join(HERE, "site.webmanifest"), "w", encoding="utf-8") as f:
+        f.write(manifest())
     with open(os.path.join(HERE, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write(sitemap(list(pages)))
     with open(os.path.join(HERE, "robots.txt"), "w", encoding="utf-8") as f:
@@ -1176,8 +1234,9 @@ def main():
     os.makedirs(dist)
 
     shutil.copytree(os.path.join(HERE, "assets"), os.path.join(dist, "assets"),
-                    ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
-    for name in list(pages) + ["sitemap.xml", "robots.txt", "_headers", "netlify.toml"]:
+                    ignore=shutil.ignore_patterns("__pycache__", ".DS_Store", "brand"))  # source artwork stays out
+    for name in list(pages) + ["sitemap.xml", "robots.txt", "_headers", "netlify.toml",
+                               "favicon.ico", "apple-touch-icon.png", "site.webmanifest"]:
         src = os.path.join(HERE, name)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(dist, name))

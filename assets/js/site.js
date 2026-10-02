@@ -60,7 +60,6 @@
   /* ---------------------------------------------------------------- nav -- */
   function nav() {
     var bar = $(".nav");
-    var prog = $(".progress");
     if (!bar) return;
 
     var last = 0;
@@ -70,10 +69,6 @@
       /* the bar steps out of the way going down and returns going up */
       bar.classList.toggle("is-hidden", y > 420 && y > last && !$(".mega.is-open"));
       last = y;
-      if (prog) {
-        var h = document.documentElement.scrollHeight - window.innerHeight;
-        prog.style.width = (h > 0 ? (y / h) * 100 : 0) + "%";
-      }
     };
     tick();
     window.addEventListener("scroll", tick, { passive: true });
@@ -322,14 +317,14 @@
       for (i = 0; i < edges.length; i++) {
         var a = edges[i][0], b = edges[i][1];
         var glow = a.a > b.a ? a.a : b.a;
-        ctx.strokeStyle = "rgba(79,228,242," + (0.05 + glow * 0.62).toFixed(3) + ")";
+        ctx.strokeStyle = "rgba(3,171,180," + (0.075 + glow * 0.5).toFixed(3) + ")";
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       }
 
       for (i = 0; i < pts.length; i++) {
         p = pts[i];
         if (p.a < 0.03) continue;
-        ctx.fillStyle = "rgba(160,244,252," + (p.a * 0.92).toFixed(3) + ")";
+        ctx.fillStyle = "rgba(0,114,124," + (p.a * 0.75).toFixed(3) + ")";
         ctx.beginPath(); ctx.arc(p.x, p.y, 1 + p.a * 2.4, 0, 6.2832); ctx.fill();
       }
 
@@ -410,6 +405,76 @@
     }
   }
 
+  /* -------------------------------------------------------- the six -- */
+  /* Desktop: the section pins and scroll position picks the pillar on stage,
+     with a progress track under each name (after Aon's homepage). Phones,
+     short screens and reduced motion get the plain stacked cards. */
+  function story() {
+    var sec = $(".story");
+    if (!sec || reduced) return;
+    var slides = $$(".story__slide", sec), tabs = $$(".story__nav button", sec);
+    var n = slides.length, idx = -1, live = false;
+    var mq = window.matchMedia("(min-width: 981px) and (min-height: 640px)");
+
+    function update() {
+      if (!live) return;
+      var total = sec.offsetHeight - window.innerHeight;
+      var p = Math.min(Math.max(-sec.getBoundingClientRect().top / total, 0), 0.9999);
+      var f = p * n, i = Math.floor(f);
+      if (i !== idx) {
+        idx = i;
+        slides.forEach(function (s, k) { s.classList.toggle("is-active", k === i); });
+        tabs.forEach(function (b, k) { b.classList.toggle("is-active", k === i); });
+      }
+      tabs.forEach(function (b, k) {
+        b.firstChild.style.width = (Math.min(Math.max(f - k, 0), 1) * 100) + "%";
+      });
+    }
+    function setLive(on) {
+      live = on;
+      sec.classList.toggle("story--live", on);
+      sec.style.setProperty("--story-h", (100 + (n - 1) * 72) + "vh");
+      idx = -1;
+      if (on) update();
+      else slides.forEach(function (s) { s.classList.remove("is-active"); });
+    }
+    tabs.forEach(function (b, k) {
+      b.addEventListener("click", function () {
+        var total = sec.offsetHeight - window.innerHeight;
+        var top = sec.getBoundingClientRect().top + window.pageYOffset;
+        window.scrollTo({ top: top + total * ((k + 0.08) / n), behavior: "smooth" });
+      });
+    });
+    setLive(mq.matches);
+    if (mq.addEventListener) mq.addEventListener("change", function (e) { setLive(e.matches); });
+    var ticking = false;
+    window.addEventListener("scroll", function () {
+      if (!ticking) { ticking = true; requestAnimationFrame(function () { update(); ticking = false; }); }
+    }, { passive: true });
+    window.addEventListener("resize", update);
+  }
+
+  /* -------------------------------------------------------- big marks -- */
+  /* The two pieces of the logo lean away from the pointer and settle back
+     when it leaves: "two pieces, one partner", made physical. */
+  function marks() {
+    if (reduced || !window.matchMedia("(hover: hover)").matches) return;
+    $$(".bigmark").forEach(function (m) {
+      var host = m.closest("section") || m;
+      var a = $(".pw--a", m), b = $(".pw--b", m);
+      if (!a || !b) return;
+      host.addEventListener("pointermove", function (e) {
+        var r = m.getBoundingClientRect();
+        var dx = (e.clientX - (r.left + r.width / 2)) / r.width;
+        var dy = (e.clientY - (r.top + r.height / 2)) / r.height;
+        dx = Math.max(-1, Math.min(1, dx)); dy = Math.max(-1, Math.min(1, dy));
+        a.style.transform = "translate(" + (-dx * 3.2).toFixed(2) + "px," + (-dy * 3.2).toFixed(2) + "px)";
+        b.style.transform = "translate(" + (dx * 3.2).toFixed(2) + "px," + (dy * 3.2).toFixed(2) + "px)";
+      });
+      host.addEventListener("pointerleave", function () { a.style.transform = ""; b.style.transform = ""; });
+    });
+  }
+
   /* ---------------------------------------------------------- scenarios -- */
   function scenarios() {
     var tabs = $$("[data-scn-tab]");
@@ -488,6 +553,7 @@
   function init() {
     transitions(); nav(); words(); reveal(); counters();
     parallax(); lattices(); wheel(); scenarios(); accordion(); contact();
+    story(); marks();
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

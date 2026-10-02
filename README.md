@@ -20,6 +20,7 @@ Python 3 (which macOS already has). It deploys anywhere that can serve files.
       technology.html …   ← one page per pillar (six of them)
       sitemap.xml  robots.txt
       netlify.toml  _headers  .htaccess   ← host config
+      make_icons.py       ← regenerates favicons from assets/brand/ (rarely needed)
 
 ## Editing the site
 
@@ -153,63 +154,61 @@ role already in the subject line — nothing is stored on the site.
 - **To change the inbox or the message:** `SITE["careers_email"]` and
   `careers_mailto()` in `build.py`.
 
-## The typeface — read this before launch
+## The typeface
 
-The site asks for **Aptos Light** first and falls back to **Inter**.
+The whole site is set in **"Hexalis Sans"**, an alias defined at the top of
+`assets/css/site.css`. Today it points at **TeX Gyre Heros** — a free,
+openly licensed clone of Helvetica (GUST Font License, a copy sits in
+`assets/fonts/`). It was chosen because Aon, the reference site, uses
+**Helvetica Now**, a paid Monotype font that Aon licenses for itself; its files
+cannot be copied, and TeX Gyre Heros was the closest match side by side.
 
-Aptos is Microsoft's font, bundled with Microsoft 365. Anyone with Office
-installed — which is most corporate desktops, and your own Mac — sees the real
-Aptos. Everyone else (most phones, most Macs without Office) gets Inter, the
-closest free neo-grotesque. The two are similar enough that nothing reflows,
-but they are not identical.
+**To switch to real Helvetica Now later:** buy a web licence (Monotype /
+MyFonts), put the `.woff2` files in `assets/fonts/`, and change the two `src:`
+URLs in the `@font-face` blocks at the top of `site.css`. Nothing else changes.
+If you have Adobe Creative Cloud, *Neue Haas Grotesk* on Adobe Fonts is the
+original Helvetica redrawn and is included in the subscription — another route.
 
-To make it Aptos for *every* visitor you have to self-host the font files, and
-that needs a licence that permits web embedding. The copies inside
-`/Applications/Microsoft Word.app/Contents/Resources/DFonts/` are licensed for
-use with Office, **not** for redistribution from a web server — do not simply
-copy them into `assets/`. Either buy a webfont licence for Aptos, or accept the
-Inter fallback, or pick a free face and make it the single font.
+## The logo and favicons
 
-Once you have licensed files, drop the `.woff2` into `assets/fonts/`, add an
-`@font-face` block at the top of `site.css`, and the existing stack picks it up
-with no other change.
+`build.py` holds the mark as a traced SVG path (`LOGO_PATH`), split into its
+two interlocking pieces so they can be animated separately: they assemble on
+load, lean apart under the pointer, and sit pulled apart on The Model page.
+The colour is `#03abb4`, sampled from the supplied artwork.
 
-## The logo
+Every browser and search icon is cut from the original artwork in
+`assets/brand/hexalis-mark-teal.png` by `make_icons.py`:
+`favicon.ico` (16/32/48), `assets/img/favicon-*.png` (16–192),
+`apple-touch-icon.png` (white ground, for iOS), the Android icons in
+`site.webmanifest`, and a matching `favicon.svg`. To regenerate after a logo
+change:
 
-`build.py` holds the mark as a single traced SVG path (`LOGO_PATH`), taken
-directly off the alpha channel of the supplied artwork. It is two interlocking
-pieces, drawn with `fill="currentColor"` — so it renders in the brand cyan on
-the dark sections and in ink on the light bands. That covers both the teal and
-the black version you were given without shipping two files.
+```bash
+python3 -m pip install --user pillow && python3 make_icons.py && python3 build.py
+```
 
-To swap in different artwork, retrace it and replace `LOGO_VIEWBOX` and
-`LOGO_PATH`. The favicon is generated from the same path, so it follows along.
+`assets/brand/` is source artwork only; the build keeps it out of `dist/`.
 
 ## Design notes
 
-- **Type** — Times New Roman, and nothing else. One family doing every job:
-  size, weight, tracking, case and italic carry all the hierarchy. Small
-  wide-tracked capitals are the workhorse label style; italic is reserved for
-  taglines and accents. There is no webfont request, so text paints instantly.
-- **Colour** — near-black obsidian (`#03080a`) with a deep teal ground, the
-  brand cyan (`#4fe4f2`) as the single accent, and a warm sand (`#e8c294`) used
-  sparingly on numerals and section marks so the palette is not purely cold.
-  One light "paper" band per page (`#f3f0e9`) breaks the dark run and makes the
-  argument sections read as print. A fine grain sits over everything.
-- **Structure** — deliberately multi-page. Each page is about two screens; the
-  argument is split across `model` → `approach` rather than
-  stacked into one endless scroll.
-- **Motion** — a wipe between pages, word-by-word heading reveals, staggered
-  section entrances, self-drawing hairlines, counting statistics, a slow hero
-  parallax, and a pointer-reactive hexagonal lattice behind every page header.
-  All of it respects `prefers-reduced-motion`, and the lattice stops drawing
-  once it scrolls out of view.
-- **No JavaScript** — the full page still renders and reads. The hidden state
-  for animations is only ever added by a class, never by default, so a blocked
-  or failed script can't leave a blank page. There is also a rescue pass that
-  reveals anything in the viewport if the observer stays silent.
-- **Accessibility** — skip link, visible focus rings, keyboard-navigable pillar
-  wheel and scenario tabs, real `aria-selected` / `aria-expanded` state.
+- **Reference** — modelled on the experience of aon.com: big bold Helvetica
+  headlines, generous white space, a scroll-pinned story on the homepage, an
+  "I want to…" panel in the hero, section headings with giant pale watermark
+  words behind them, card grids, and a "Start here" call to action card.
+- **Colour** — white ground, navy-charcoal ink `#1f2433` (never pure black),
+  the HEXALIS blue `#4fe4f2` unchanged for buttons, fills and highlights, and
+  `#00727c` — the same hue, darker — only where small text needs to be
+  readable on white. Pale teal-tinted bands `#f3f9fa` separate sections.
+- **No AI tells** — no letterspaced uppercase labels, no numbered "01 —"
+  rules, no grain, no grid lines, no ticker, no italic accent words. Eyebrows
+  are one short sentence-case line led by a small solid hexagon.
+- **Fun, specific to HEXALIS** — the logo is two pieces that become one, so
+  that is the interaction: the big marks assemble, react to the pointer, and
+  the page-change wipe assembles the logo too. The homepage walks through the
+  six pillars as you scroll, with a progress track under each name. The
+  honeycomb in the page heroes still glows around the pointer.
+- **Motion** — everything respects `prefers-reduced-motion`. Without
+  JavaScript every page is complete; the pinned story becomes stacked cards.
 
 ## Content source
 
