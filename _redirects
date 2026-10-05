@@ -1,0 +1,4 @@
+# Cloudflare Pages reads this file (it ignores netlify.toml).
+# In Practice is offline for now; old links land on The Model instead of a 404.
+/practice       /model   302
+/practice.html  /model   302

@@ -600,7 +600,7 @@ def page_model():
 <main id="main">
   {inner_hero("The Model", "Most companies buy capability in fragments.", "Six suppliers. Six briefs. Six versions of your brand.",
               lede="It is not that any one of them is bad. It is that nobody owns the whole — and the gaps between vendors are exactly where budgets, timelines and brand consistency go to die.",
-              crumb='<span style="color:var(--cyan)">The Model</span>', art="split")}
+              crumb='<span style="color:var(--cyan)">The Model</span>')}
 
   <section class="paper pad">
     <div class="wm" aria-hidden="true">One</div>
@@ -928,7 +928,7 @@ def page_contact():
                 "contact.html") + nav("contact") + f'''
 <main id="main">
   {inner_hero("Start a Conversation", "Tell us what is<br>in the way.", "Thirty minutes. No deck.",
-              crumb='<span style="color:var(--cyan)">Contact</span>', art="blue")}
+              crumb='<span style="color:var(--cyan)">Contact</span>')}
 
   <section class="pad">
     <div class="shell shell--wide">
@@ -1099,14 +1099,14 @@ def page_careers():
       </article>'''
 
     return head("Careers at HEXALIS — open positions",
-                f"{len(ROLES)} open positions at HEXALIS in Gurugram, across business development, events, "
-                f"digital marketing, creative and the Founder's Office.",
+                f"{len(ROLES)} open positions at HEXALIS in Gurugram, across operations and client delivery, "
+                f"business development, events, digital marketing, creative and the Founder's Office.",
                 "careers.html") + nav("careers") + f'''
 <main id="main">
   {inner_hero("Careers", "Six pillars.<br>One team building them.",
               "Open positions at HEXALIS.",
               lede="HEXALIS is early enough that the person doing the work shapes how it gets done. These are the roles we are hiring for right now, all based in Gurugram. Open a role to read the full brief, or write to us directly.",
-              crumb='<span style="color:var(--cyan)">Careers</span>', art="blue")}
+              crumb='<span style="color:var(--cyan)">Careers</span>')}
 
   <section class="pad">
     <div class="shell shell--wide">
@@ -1236,7 +1236,7 @@ def main():
     shutil.copytree(os.path.join(HERE, "assets"), os.path.join(dist, "assets"),
                     ignore=shutil.ignore_patterns("__pycache__", ".DS_Store", "brand"))  # source artwork stays out
     for name in list(pages) + ["sitemap.xml", "robots.txt", "_headers", "netlify.toml",
-                               "favicon.ico", "apple-touch-icon.png", "site.webmanifest"]:
+                               "favicon.ico", "apple-touch-icon.png", "site.webmanifest", "_redirects"]:
         src = os.path.join(HERE, name)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(dist, name))

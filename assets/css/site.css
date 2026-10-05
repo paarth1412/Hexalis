@@ -184,8 +184,6 @@ section { position: relative; }
 .brand { display: flex; align-items: center; gap: 12px; flex: none; margin-right: auto; }
 .brand__mark { width: 34px; height: 37px; flex: none; overflow: visible; }
 .brand__mark .pc, .foot__mark .pc, .curtain__mark .pc, .bigmark .pc { fill: var(--logo); transition: transform .5s var(--ease); }
-.brand:hover .pc--a { transform: translate(-3px, -3px); }
-.brand:hover .pc--b { transform: translate(3px, 3px); }
 .brand__type { font-weight: 700; font-size: 1.32rem; letter-spacing: .14em; color: var(--ink); }
 
 .nav__links { display: flex; align-items: center; gap: 4px; }
@@ -273,8 +271,6 @@ section { position: relative; }
 }
 .bigmark--blue::before { background: var(--blue); }
 .bigmark--blue .pc { fill: #fff; }
-.js .bigmark .pc--a { animation: piece-a 1.4s var(--ease) .15s both; }
-.js .bigmark .pc--b { animation: piece-b 1.4s var(--ease) .15s both; }
 @keyframes piece-a { from { transform: translate(-26%, -18%); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes piece-b { from { transform: translate(26%, 18%); opacity: 0; } to { transform: none; opacity: 1; } }
 
@@ -589,8 +585,6 @@ section:not(.paper) .goal { background: var(--bg-2); }
 .is-leaving .curtain { transform: scaleY(1); }
 .curtain__mark { position: absolute; left: 50%; top: 50%; width: 52px; height: 57px; margin: -28px 0 0 -26px; overflow: visible; opacity: 0; transition: opacity .2s .15s; }
 .is-leaving .curtain__mark { opacity: 1; }
-.is-leaving .curtain__mark .pc--a { animation: piece-a .6s var(--ease) .1s both; }
-.is-leaving .curtain__mark .pc--b { animation: piece-b .6s var(--ease) .1s both; }
 
 /* -- 15 motion ------------------------------------------------------------- */
 /* (no whole-page fade: the wipe covers the change of page, and each block
@@ -674,10 +668,7 @@ section:not(.paper) .goal { background: var(--bg-2); }
 /* Graphic tiles draw their back layer with z-index:-1; isolating them keeps
    that layer above the card or slide behind them instead of beneath it. */
 .tile, .phero__ico, .bigmark { isolation: isolate; }
-.pw { transition: transform .6s var(--ease); }
-.brand:hover .pw--a { transform: translate(-2.4px, -2.4px); }
-.brand:hover .pw--b { transform: translate(2.4px, 2.4px); }
-.brand:hover .pc--a, .brand:hover .pc--b { transform: none; }
+
 
 /* short laptop screens: keep the pinned slide comfortably inside the view */
 @media (min-width: 981px) and (max-height: 820px) {
@@ -687,10 +678,6 @@ section:not(.paper) .goal { background: var(--bg-2); }
   .story--live .story__art { max-width: 280px; }
 }
 
-/* hero art variants */
-.bigmark--split .pw--a { transform: translate(-7px, -6px); }
-.bigmark--split .pw--b { transform: translate(7px, 6px); }
-.bigmark--split .pc--a { fill: var(--ink); }
 
 /* Watermark words and offset art are allowed to bleed to the section edge,
    never past it. clip (not hidden) keeps the pinned story's sticky working. */
@@ -703,3 +690,9 @@ main > section, .foot { overflow-x: clip; }
   .story__slide h3 { font-size: clamp(2.1rem, 10.4vw, 3rem); }
   .cta__card { padding: 30px 22px; }
 }
+
+/* The logo is always drawn whole and in its own colour. Its two pieces are
+   never moved, separated, recoloured or animated. */
+.bigmark svg { opacity: 1; }
+
+.pw, .pc { transform: none !important; }

@@ -1,4 +1,4 @@
-# Netlify / Cloudflare Pages
+# Read by Cloudflare Pages (and Netlify)
 # Assets carry a content hash in the URL, so they can be cached hard.
 # HTML must revalidate, otherwise visitors keep an old page after a deploy.
 

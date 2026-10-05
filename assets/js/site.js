@@ -454,27 +454,6 @@
     window.addEventListener("resize", update);
   }
 
-  /* -------------------------------------------------------- big marks -- */
-  /* The two pieces of the logo lean away from the pointer and settle back
-     when it leaves: "two pieces, one partner", made physical. */
-  function marks() {
-    if (reduced || !window.matchMedia("(hover: hover)").matches) return;
-    $$(".bigmark").forEach(function (m) {
-      var host = m.closest("section") || m;
-      var a = $(".pw--a", m), b = $(".pw--b", m);
-      if (!a || !b) return;
-      host.addEventListener("pointermove", function (e) {
-        var r = m.getBoundingClientRect();
-        var dx = (e.clientX - (r.left + r.width / 2)) / r.width;
-        var dy = (e.clientY - (r.top + r.height / 2)) / r.height;
-        dx = Math.max(-1, Math.min(1, dx)); dy = Math.max(-1, Math.min(1, dy));
-        a.style.transform = "translate(" + (-dx * 3.2).toFixed(2) + "px," + (-dy * 3.2).toFixed(2) + "px)";
-        b.style.transform = "translate(" + (dx * 3.2).toFixed(2) + "px," + (dy * 3.2).toFixed(2) + "px)";
-      });
-      host.addEventListener("pointerleave", function () { a.style.transform = ""; b.style.transform = ""; });
-    });
-  }
-
   /* ---------------------------------------------------------- scenarios -- */
   function scenarios() {
     var tabs = $$("[data-scn-tab]");
@@ -553,7 +532,7 @@
   function init() {
     transitions(); nav(); words(); reveal(); counters();
     parallax(); lattices(); wheel(); scenarios(); accordion(); contact();
-    story(); marks();
+    story();
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
