@@ -17,8 +17,18 @@ export const DEFAULTS = {
   office_radius_m: "0",
 };
 
+// Settings change rarely, so each server instance keeps them for 30 seconds
+// instead of reading them from the database on every request.
+let cache = null;
+const CACHE_MS = 30000;
+export function clearSettingsCache() { cache = null; }
 export async function loadSettings(env) {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
   const { results } = await env.DB.prepare("SELECT key, value FROM settings").all();
+  cache = { at: Date.now(), value: build(results) };
+  return cache.value;
+}
+function build(results) {
   const s = { ...DEFAULTS };
   for (const r of results) if (r.key in DEFAULTS) s[r.key] = r.value;
   return {
@@ -67,12 +77,14 @@ export async function saveSettings(env, body) {
     }
     out.office_radius_m = String(r);
   }
+  clearSettingsCache();
   const merged = { ...(await loadSettings(env)).raw, ...out };
   if (hhmmToMin(merged.shift_end) <= hhmmToMin(merged.shift_start)) throw new Error("The shift must end after it starts.");
   if (Number(merged.half_day_hours) >= Number(merged.full_day_hours)) throw new Error("Half-day hours must be fewer than full-day hours.");
-  for (const [k, v] of Object.entries(out)) {
-    await env.DB.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(k, v).run();
-  }
+  const stmt = "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+  const writes = Object.entries(out).map(([k, v]) => env.DB.prepare(stmt).bind(k, v));
+  if (writes.length) await env.DB.batch(writes);
+  clearSettingsCache();
   return out;
 }
 

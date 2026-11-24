@@ -30,6 +30,12 @@ async function soleAdmin(env) {
   const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1").first();
   return r.n <= 1;
 }
+function canApproveSync(me, requester, sole) {
+  if (me.id === requester.id) return me.role === "admin" && sole;
+  if (me.role === "admin") return true;
+  if (me.role === "manager") return requester.role === "employee" && requester.manager_id === me.id;
+  return false;
+}
 async function canApprove(env, me, requester) {
   if (me.id === requester.id) return me.role === "admin" && (await soleAdmin(env));
   if (me.role === "admin") return true;
@@ -104,15 +110,21 @@ function entitlement(type, since, year, today) {
   }
   return Math.floor((type.yearly_quota / 12) * months * 2) / 2;
 }
+// The two queries balances need; usable inside a batch with other queries.
+const TYPES_SQL = "SELECT * FROM leave_types WHERE active = 1 ORDER BY id";
+const USED_SQL = `SELECT user_id, leave_type_id, status, SUM(days) AS days FROM leaves
+  WHERE status IN ('approved','pending') AND substr(start_date,1,4) = ? AND user_id IN (SELECT value FROM json_each(?))
+  GROUP BY user_id, leave_type_id, status`;
+const usedStmt = (env, userIds, year) => env.DB.prepare(USED_SQL).bind(String(year), JSON.stringify(userIds));
+
 async function balances(env, user, year) {
+  const [t, u] = await env.DB.batch([env.DB.prepare(TYPES_SQL), usedStmt(env, [user.id], year)]);
+  return computeBalances(t.results, u.results, user, year);
+}
+function computeBalances(types, usedAll, user, year) {
   year = Number(year);
   const today = todayIST();
-  const { results: types } = await env.DB.prepare("SELECT * FROM leave_types WHERE active = 1 ORDER BY id").all();
-  const { results: used } = await env.DB.prepare(
-    `SELECT leave_type_id, status, SUM(days) AS days FROM leaves
-      WHERE user_id = ? AND status IN ('approved','pending') AND substr(start_date,1,4) = ?
-      GROUP BY leave_type_id, status`
-  ).bind(user.id, String(year)).all();
+  const used = usedAll.filter((x) => x.user_id === user.id);
   const since = sinceOf(user);
   return types.map((t) => {
     const approved = used.find((u) => u.leave_type_id === t.id && u.status === "approved")?.days || 0;
@@ -147,29 +159,39 @@ function readDoc(doc) {
 
 // ---- Today -----------------------------------------------------------------------
 async function overview(env, me) {
-  const cfg = await loadSettings(env);
   const today = todayIST();
-  const att = await env.DB.prepare("SELECT * FROM attendance WHERE user_id = ? AND date = ?").bind(me.id, today).first();
-  const onLeave = await env.DB.prepare(
-    "SELECT l.*, t.name AS type FROM leaves l JOIN leave_types t ON t.id = l.leave_type_id WHERE user_id = ? AND status = 'approved' AND ? BETWEEN start_date AND end_date"
-  ).bind(me.id, today).first();
-  const holiday = await env.DB.prepare("SELECT name FROM holidays WHERE date = ?").bind(today).first();
-  const pending = me.role === "employee" ? 0 : (await pendingApprovals(env, me)).length;
-  const manager = me.manager_id ? await env.DB.prepare("SELECT name FROM users WHERE id = ?").bind(me.manager_id).first() : null;
-
-  // Days in the last two weeks with a check-in but no check-out.
-  const { results: openDays } = await env.DB.prepare(
-    `SELECT a.date FROM attendance a WHERE a.user_id = ? AND a.check_out_at IS NULL AND a.date < ? AND a.date >= ?
-       AND NOT EXISTS (SELECT 1 FROM corrections c WHERE c.user_id = a.user_id AND c.date = a.date AND c.status = 'pending')
-     ORDER BY a.date DESC`
-  ).bind(me.id, today, addDays(today, -14)).all();
-  for (const d of openDays) {
-    const text = `You didn't check out on ${fmtD(d.date)}. Request a correction so your hours are right.`;
-    if (!(await env.DB.prepare("SELECT 1 FROM notifications WHERE user_id = ? AND text = ?").bind(me.id, text).first())) {
-      await notify(env, [me.id], text, "today");
-    }
+  // Everything the Today screen needs, read in one database round trip.
+  const [cfg, rows, pendingList] = await Promise.all([
+    loadSettings(env),
+    env.DB.batch([
+      env.DB.prepare("SELECT * FROM attendance WHERE user_id = ? AND date = ?").bind(me.id, today),
+      env.DB.prepare("SELECT l.*, t.name AS type FROM leaves l JOIN leave_types t ON t.id = l.leave_type_id WHERE user_id = ? AND status = 'approved' AND ? BETWEEN start_date AND end_date LIMIT 1").bind(me.id, today),
+      env.DB.prepare("SELECT name FROM holidays WHERE date = ?").bind(today),
+      env.DB.prepare("SELECT name FROM users WHERE id = ?").bind(me.manager_id || 0),
+      // Days in the last two weeks with a check-in but no check-out, and no reminder yet.
+      env.DB.prepare(
+        `SELECT a.date, EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = a.user_id AND n.link = 'today' AND n.text LIKE '%' || a.date || '%') AS reminded
+           FROM attendance a WHERE a.user_id = ? AND a.check_out_at IS NULL AND a.date < ? AND a.date >= ?
+            AND NOT EXISTS (SELECT 1 FROM corrections c WHERE c.user_id = a.user_id AND c.date = a.date AND c.status = 'pending')
+          ORDER BY a.date DESC`
+      ).bind(me.id, today, addDays(today, -14)),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL").bind(me.id),
+    ]),
+    me.role === "employee" ? [] : pendingApprovals(env, me),
+  ]);
+  const one = (i) => rows[i].results[0] || null;
+  const att = one(0), onLeave = one(1), holiday = one(2), manager = me.manager_id ? one(3) : null;
+  const openDays = rows[4].results;
+  const pending = pendingList.length;
+  let unreadN = one(5).n;
+  const toRemind = openDays.filter((d) => !d.reminded);
+  if (toRemind.length) {
+    // The date is in the text as YYYY-MM-DD too, so it's only ever sent once.
+    await env.DB.batch(toRemind.map((d) => env.DB.prepare("INSERT INTO notifications (user_id, text, link, created_at) VALUES (?, ?, 'today', ?)")
+      .bind(me.id, `You didn't check out on ${fmtD(d.date)} (${d.date}). Request a correction so your hours are right.`, nowISO())));
+    unreadN += toRemind.length;
   }
-  const unread = await env.DB.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL").bind(me.id).first();
+  const unread = { n: unreadN };
 
   return json({
     user: { id: me.id, name: me.name, email: me.email, role: me.role, manager: manager?.name || null, since: sinceOf(me) },
@@ -185,11 +207,12 @@ async function myMonth(env, me, url) {
   const month = url.searchParams.get("month") || todayIST().slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) return bad("Bad month.");
   const from = month + "-01", to = month + "-31";
-  const { results: attendance } = await env.DB.prepare("SELECT * FROM attendance WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date").bind(me.id, from, to).all();
-  const { results: leaves } = await env.DB.prepare(
-    "SELECT l.*, t.name AS type FROM leaves l JOIN leave_types t ON t.id = l.leave_type_id WHERE user_id = ? AND status IN ('approved','pending') AND end_date >= ? AND start_date <= ?"
-  ).bind(me.id, from, to).all();
-  const { results: holidays } = await env.DB.prepare("SELECT * FROM holidays WHERE date BETWEEN ? AND ?").bind(from, to).all();
+  const [a, l, h] = await env.DB.batch([
+    env.DB.prepare("SELECT * FROM attendance WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date").bind(me.id, from, to),
+    env.DB.prepare("SELECT l.*, t.name AS type FROM leaves l JOIN leave_types t ON t.id = l.leave_type_id WHERE user_id = ? AND status IN ('approved','pending') AND end_date >= ? AND start_date <= ?").bind(me.id, from, to),
+    env.DB.prepare("SELECT * FROM holidays WHERE date BETWEEN ? AND ?").bind(from, to),
+  ]);
+  const attendance = a.results, leaves = l.results, holidays = h.results;
   // Days before someone joined aren't counted as missing.
   return json({ month, today: todayIST(), since: sinceOf(me), weekend: [...cfg.weekend], attendance, leaves, holidays });
 }
@@ -328,17 +351,19 @@ async function applyCorrection(env, cfg, c, reviewer) {
 // ---- Leave ------------------------------------------------------------------------
 async function leaveOverview(env, me) {
   const year = todayIST().slice(0, 4);
-  const { results: requests } = await env.DB.prepare(
-    `SELECT l.*, t.name AS type, r.name AS reviewer, d.name AS doc_name FROM leaves l
-       JOIN leave_types t ON t.id = l.leave_type_id LEFT JOIN users r ON r.id = l.reviewer_id
-       LEFT JOIN leave_docs d ON d.leave_id = l.id
-      WHERE l.user_id = ? ORDER BY l.start_date DESC LIMIT 100`
-  ).bind(me.id).all();
-  const { results: wfh } = await env.DB.prepare(
-    `SELECT a.*, r.name AS reviewer FROM attendance a LEFT JOIN users r ON r.id = a.reviewer_id
-      WHERE a.user_id = ? AND a.mode = 'wfh' ORDER BY a.date DESC LIMIT 30`
-  ).bind(me.id).all();
-  return json({ year, since: sinceOf(me), balances: await balances(env, me, year), requests, wfh, today: todayIST() });
+  const [rq, wf, ty, us] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT l.*, t.name AS type, r.name AS reviewer, d.name AS doc_name FROM leaves l
+         JOIN leave_types t ON t.id = l.leave_type_id LEFT JOIN users r ON r.id = l.reviewer_id
+         LEFT JOIN leave_docs d ON d.leave_id = l.id
+        WHERE l.user_id = ? ORDER BY l.start_date DESC LIMIT 100`).bind(me.id),
+    env.DB.prepare(
+      `SELECT a.*, r.name AS reviewer FROM attendance a LEFT JOIN users r ON r.id = a.reviewer_id
+        WHERE a.user_id = ? AND a.mode = 'wfh' ORDER BY a.date DESC LIMIT 30`).bind(me.id),
+    env.DB.prepare(TYPES_SQL),
+    usedStmt(env, [me.id], year),
+  ]);
+  return json({ year, since: sinceOf(me), balances: computeBalances(ty.results, us.results, me, year), requests: rq.results, wfh: wf.results, today: todayIST() });
 }
 
 async function applyLeave(env, me, body) {
@@ -419,32 +444,27 @@ async function leaveDoc(env, me, id) {
 // ---- Approvals ----------------------------------------------------------------------
 async function pendingApprovals(env, me) {
   if (me.role === "employee") return [];
-  const { results: leaves } = await env.DB.prepare(
+  const [lv, wf, co, admins] = await env.DB.batch([env.DB.prepare(
     `SELECT 'leave' AS kind, l.id, l.start_date, l.end_date, l.half_day, l.days, l.reason, l.created_at, t.name AS type,
             d.name AS doc_name, u.id AS user_id, u.name, u.role, u.manager_id, u.department
        FROM leaves l JOIN users u ON u.id = l.user_id JOIN leave_types t ON t.id = l.leave_type_id
        LEFT JOIN leave_docs d ON d.leave_id = l.id
       WHERE l.status = 'pending' ORDER BY l.created_at`
-  ).all();
-  const { results: wfh } = await env.DB.prepare(
+  ), env.DB.prepare(
     `SELECT 'wfh' AS kind, a.id, a.date AS start_date, a.date AS end_date, a.check_in_at AS created_at,
             u.id AS user_id, u.name, u.role, u.manager_id, u.department
        FROM attendance a JOIN users u ON u.id = a.user_id
       WHERE a.mode = 'wfh' AND a.status = 'pending' ORDER BY a.date`
-  ).all();
-  const { results: corr } = await env.DB.prepare(
+  ), env.DB.prepare(
     `SELECT 'correction' AS kind, c.id, c.date AS start_date, c.date AS end_date, c.kind AS fix, c.mode, c.check_in_at, c.check_out_at,
             c.reason, c.created_at, a.check_in_at AS was_in, a.check_out_at AS was_out, a.mode AS was_mode,
             u.id AS user_id, u.name, u.role, u.manager_id, u.department
        FROM corrections c JOIN users u ON u.id = c.user_id
        LEFT JOIN attendance a ON a.user_id = c.user_id AND a.date = c.date
       WHERE c.status = 'pending' ORDER BY c.created_at`
-  ).all();
-  const out = [];
-  for (const r of [...leaves, ...wfh, ...corr]) {
-    if (await canApprove(env, me, { id: r.user_id, role: r.role, manager_id: r.manager_id })) out.push(r);
-  }
-  return out;
+  ), env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1")]);
+  const sole = admins.results[0].n <= 1;
+  return [...lv.results, ...wf.results, ...co.results].filter((r) => canApproveSync(me, { id: r.user_id, role: r.role, manager_id: r.manager_id }, sole));
 }
 
 async function decide(env, me, kind, id, body) {
@@ -480,17 +500,20 @@ async function team(env, me, url) {
   if (!isValidDate(date)) return bad("Bad date.");
   const dept = url.searchParams.get("department") || "";
   const f = teamFilter(me);
-  const { results: all } = await env.DB.prepare(
+  // The team, today's holiday and pending requests, all at the same time.
+  const [{ results: all }, holiday, pend] = await Promise.all([env.DB.prepare(
     `SELECT u.id, u.name, u.role, u.email, u.employee_code, u.department, u.designation, u.joining_date, u.created_at, u.dob,
             a.mode, a.status AS att_status, a.check_in_at, a.check_out_at, a.late, a.early, a.worked_min, a.day_status, a.corrected,
             (SELECT t.name || CASE WHEN l.half_day THEN ' (half day)' ELSE '' END FROM leaves l JOIN leave_types t ON t.id = l.leave_type_id
               WHERE l.user_id = u.id AND l.status = 'approved' AND ? BETWEEN l.start_date AND l.end_date LIMIT 1) AS leave_type
        FROM users u LEFT JOIN attendance a ON a.user_id = u.id AND a.date = ?
       WHERE ${f.sql} ORDER BY u.name`
-  ).bind(date, date, ...f.args).all();
+  ).bind(date, date, ...f.args).all(),
+    env.DB.prepare("SELECT name FROM holidays WHERE date = ?").bind(date).first(),
+    pendingApprovals(env, me),
+  ]);
   const departments = [...new Set(all.map((p) => p.department).filter(Boolean))].sort();
   const people = (dept ? all.filter((p) => p.department === dept) : all).filter((p) => sinceOf(p) <= date);
-  const holiday = await env.DB.prepare("SELECT name FROM holidays WHERE date = ?").bind(date).first();
   const working = !cfg.weekend.has(weekday(date)) && !holiday;
   const dayOver = date < today || (date === today && nowMinutesIST() >= cfg.shiftEnd);
   const lateNow = date < today || (date === today && nowMinutesIST() > cfg.shiftStart + cfg.grace);
@@ -509,7 +532,6 @@ async function team(env, me, url) {
     }
     if (p.leave_type && p.leave_type.includes("half day")) c.onLeave += 0.5;
   }
-  const pend = await pendingApprovals(env, me);
   const birthdays = all.filter((p) => p.dob && p.dob.slice(5) === date.slice(5)).map((p) => p.name);
   for (const p of people) { delete p.dob; delete p.created_at; }
   return json({
@@ -525,9 +547,8 @@ async function teamBalances(env, me) {
   const f = teamFilter(me);
   const { results } = await env.DB.prepare(`SELECT u.id, u.name, u.department, u.joining_date, u.created_at FROM users u WHERE ${f.sql} ORDER BY u.name`).bind(...f.args).all();
   const year = todayIST().slice(0, 4);
-  const out = [];
-  for (const p of results) out.push({ id: p.id, name: p.name, department: p.department, balances: await balances(env, p, year) });
-  return json({ year, people: out });
+  const [ty, us] = await env.DB.batch([env.DB.prepare(TYPES_SQL), usedStmt(env, results.map((p) => p.id), year)]);
+  return json({ year, people: results.map((p) => ({ id: p.id, name: p.name, department: p.department, balances: computeBalances(ty.results, us.results, p, year) })) });
 }
 
 // ---- Reports ----------------------------------------------------------------------------

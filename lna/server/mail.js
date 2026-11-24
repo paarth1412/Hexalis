@@ -29,9 +29,13 @@ const later = (min) => new Date(Date.now() + min * 60000).toISOString().replace(
 const oneLine = (s) => String(s).replace(/[\r\n]+/g, " ").trim();
 
 // ---- queue -----------------------------------------------------------------------
+// Set when this server instance queues an email, so it's sent right after the response.
+export const queueState = { fresh: false };
+
 export async function enqueue(env, { userId = null, to, subject, body, link = null }) {
   await env.DB.prepare("INSERT INTO outbox (user_id, to_addr, subject, body, link, next_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .bind(userId, oneLine(to), oneLine(subject).slice(0, 150), String(body).slice(0, 4000), link, nowISO(), nowISO()).run();
+  queueState.fresh = true;
 }
 
 // Sends what's due. Called after responses (context.waitUntil), so nobody waits on it.

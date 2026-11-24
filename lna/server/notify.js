@@ -1,6 +1,6 @@
 // Notifications: the in-app bell, plus an email when it's worth one.
 import { nowISO, todayIST } from "./util.js";
-import { enqueue, processOutbox } from "./mail.js";
+import { enqueue, processOutbox, queueState } from "./mail.js";
 import { loadSettings, nowMinutesIST } from "./settings.js";
 
 // userIds may repeat or include nulls; each person gets one copy.
@@ -35,7 +35,12 @@ async function checkoutReminders(env) {
 }
 
 // Runs after each /lna response (context.waitUntil): reminders, then due emails.
+// Each server instance does this at most once a minute; it never delays a page.
+let lastRun = 0;
 export async function background(env, origin) {
+  if (!queueState.fresh && Date.now() - lastRun < 60000) return;
+  queueState.fresh = false;
+  lastRun = Date.now();
   try { await checkoutReminders(env); } catch (e) { console.error("reminders", e); }
   try { await processOutbox(env, origin); } catch (e) { console.error("outbox", e); }
 }

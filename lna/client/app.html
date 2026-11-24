@@ -121,13 +121,18 @@
       `<button class="tab" role="tab" aria-selected="${k === active}" data-tab="${k}">${label}${k === "approvals" && ME.pendingApprovals ? `<span class="badge">${ME.pendingApprovals}</span>` : ""}</button>`).join("");
   }
   function current() { const h = location.hash.slice(1); return tabsFor(ME.user.role).some(([k]) => k === h) ? h : "today"; }
-  async function go(tab, keepFlash) {
+  // Switching tabs reuses what we already know about you (refreshed quietly in
+  // the background); after you change something it's fetched fresh first.
+  let ME_AT = 0;
+  async function refreshMe() { ME = await api("/me"); ME_AT = Date.now(); setBell(ME.unread); return ME; }
+  async function go(tab, keepFlash, fresh) {
     if (!keepFlash) FLASH = null;
     if (TIMER) { clearInterval(TIMER); TIMER = null; }
-    ME = await api("/me");
-    setBell(ME.unread);
+    const stale = !ME || fresh || Date.now() - ME_AT > 60000;
+    if (stale) await refreshMe();
     renderTabs(tab);
     try { await VIEWS[tab](); } catch (err) { view.innerHTML = notice("err", err.message); }
+    if (!stale && Date.now() - ME_AT > 5000) refreshMe().then(() => renderTabs(current())).catch(() => {});
   }
   function flash(kind, text) { FLASH = { kind, text }; }
   const flashHtml = () => FLASH ? notice(FLASH.kind, FLASH.text) : "";
@@ -163,8 +168,8 @@
       <p class="fine mt">${shiftLine()}</p>`;
   }
 
-  async function calendarHtml() {
-    const d = await api("/month?month=" + CAL_MONTH);
+  async function calendarHtml(pre) {
+    const d = await (pre || api("/month?month=" + CAL_MONTH));
     const [y, m] = d.month.split("-").map(Number);
     const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
     const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -235,6 +240,9 @@
       ? notice("info", `${ME.pendingApprovals} request${ME.pendingApprovals === 1 ? " is" : "s are"} waiting for your approval.`) : "";
     const open = ME.openDays.length ? `<div class="notice notice--err" role="alert">You didn't check out on ${ME.openDays.map(fmtDate).join(", ")}.
         ${ME.openDays.map((d) => `<button class="btn btn--quiet btn--sm" data-act="correct" data-date="${d}" data-kind="out">Fix ${fmtDate(d)}</button>`).join(" ")}</div>` : "";
+    // Both requests go out at the same time.
+    const monthP = api("/month?month=" + CAL_MONTH);
+    monthP.catch(() => {});
     const corr = await api("/corrections");
     const crow = corr.items.map((c) => {
       const what = c.kind === "in" ? `Check-in ${hhmmIST(c.check_in_at)}` : c.kind === "out" ? `Check-out ${hhmmIST(c.check_out_at)}` : `${hhmmIST(c.check_in_at)}–${hhmmIST(c.check_out_at)}${c.mode ? ` (${c.mode === "wfh" ? "WFH" : "office"})` : ""}`;
@@ -252,7 +260,7 @@
         </div>
         <section class="card" id="calCard"><p class="empty">Loading calendar…</p></section>
       </div>`;
-    document.getElementById("calCard").innerHTML = await calendarHtml();
+    document.getElementById("calCard").innerHTML = await calendarHtml(monthP);
   };
 
   // ---- Leave ------------------------------------------------------------------------
@@ -607,7 +615,7 @@
   async function run(fn, okText, then) {
     try { await fn(); if (okText) flash("ok", okText); }
     catch (err) { if (err.message !== "signed out" && err.message !== "change") flash("err", err.message); }
-    await go(then || current(), true);
+    await go(then || current(), true, true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function position() {
@@ -752,7 +760,7 @@
 
   window.addEventListener("hashchange", () => go(current()));
   (async () => {
-    ME = await api("/me");
+    await refreshMe();
     document.getElementById("who").innerHTML = `${esc(ME.user.name)} · ${ROLE[ME.user.role]}`;
     go(current(), true);
   })();

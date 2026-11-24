@@ -12,3 +12,8 @@ database_name = "hexalis-lna"
 # separate practice copy in .wrangler/ instead.
 database_id = "438b79bb-baea-4fc0-8a69-d6f7e659798d"
 migrations_dir = "lna/migrations"
+
+# Run /lna's code next to its database instead of next to each visitor: one
+# long hop for the visitor, then many short hops to the database.
+[placement]
+mode = "smart"

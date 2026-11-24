@@ -30,21 +30,21 @@ export async function currentSession(env, request) {
   const id = await sha256(token);
   const row = await env.DB.prepare(
     `SELECT s.id AS session_id, s.expires_at, s.last_seen_at, s.created_at AS session_started, u.id, u.email, u.name, u.role, u.manager_id, u.must_change, u.active,
-            u.password_hash IS NOT NULL AS has_password, u.joining_date, u.department, u.created_at AS user_created
+            u.joining_date, u.department, u.created_at AS user_created,
+            (SELECT value FROM settings WHERE key = 'idle_minutes') AS idle_minutes
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`
   ).bind(id).first();
   if (!row) return null;
   // Signed out after a set time with no activity (Settings → idle sign-out),
   // and in any case 12 hours after signing in.
-  const idle = await env.DB.prepare("SELECT value FROM settings WHERE key = 'idle_minutes'").first().catch(() => null);
-  const idleMin = Number(idle?.value) || 60;
+  const idleMin = Number(row.idle_minutes) || 60;
   const lastSeen = row.last_seen_at || row.session_started;
   if (row.expires_at < nowISO() || !row.active || lastSeen < minutesFromNow(-idleMin)) {
     await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(id).run();
     return null;
   }
-  // Activity is recorded at most once a minute to keep database writes low.
-  if (lastSeen < minutesFromNow(-1)) {
+  // Activity is recorded at most every 5 minutes, to keep database writes low.
+  if (lastSeen < minutesFromNow(-5)) {
     await env.DB.prepare("UPDATE sessions SET last_seen_at = ? WHERE id = ?").bind(nowISO(), id).run();
   }
   return row;
