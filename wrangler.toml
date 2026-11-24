@@ -1,0 +1,14 @@
+# Cloudflare config for the HEXALIS site + /lna (Leave & Attendance).
+# Locally, `npm run dev` uses this to serve dist/ and run functions/ with a
+# local database stored in .wrangler/ (on this Mac only, never uploaded).
+name = "hexalis"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hexalis-lna"
+# The live database (Cloudflare D1, APAC). Locally, `npm run dev` uses a
+# separate practice copy in .wrangler/ instead.
+database_id = "438b79bb-baea-4fc0-8a69-d6f7e659798d"
+migrations_dir = "lna/migrations"

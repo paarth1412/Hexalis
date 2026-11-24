@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Leave &amp; Attendance — HEXALIS</title>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<style nonce="{{NONCE}}">{{STYLES}}</style>
+</head>
+<body>
+<header class="top">
+  <div class="top__in">
+    <a class="top__brand" href="/lna">{{LOGO}}<span>HEXALIS</span></a>
+    <span class="top__app">Leave &amp; Attendance</span>
+    <div class="top__me">
+      <span class="who" id="who"></span>
+      <button class="bell" id="bell" type="button" aria-label="Notifications">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 16v-5a6 6 0 0 0-12 0v5l-2 2h16z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+        <span class="badge" id="bellCount" hidden></span>
+      </button>
+      <form method="post" action="/lna/logout"><button class="btn btn--quiet btn--sm" type="submit">Sign out</button></form>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="Sections"></nav>
+</header>
+<main id="view" aria-live="polite"><p class="empty">Loading…</p></main>
+<dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+
+<script nonce="{{NONCE}}">
+"use strict";
+(() => {
+  const view = document.getElementById("view");
+  const dlg = document.getElementById("dlg");
+  const dlgBody = document.getElementById("dlgBody");
+  let ME = null, CAL_MONTH = null, TEAM_DATE = null, TEAM_DEPT = "", FLASH = null, TIMER = null, REPORT = null, AUDIT = { person: "", items: [] };
+
+  // ---- helpers ----------------------------------------------------------------
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const fmtDate = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${+day} ${MONTHS[+m - 1]} ${y}`; };
+  const fmtRange = (a, b) => a === b ? fmtDate(a) : `${fmtDate(a)} – ${fmtDate(b)}`;
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" }) : "";
+  const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "";
+  const fmtDays = (n) => `${n} day${n === 1 ? "" : "s"}`;
+  const fmtHours = (min) => min === null || min === undefined ? "" : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
+  const hhmmIST = (iso) => iso ? new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  const toMin = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+  const ROLE = { admin: "Admin", manager: "Manager", employee: "Employee" };
+  const DAY_STATUS = { present: "Full day", half_day: "Half day", short: "Short hours" };
+  const chip = (status, text) => `<span class="chip chip--${esc(status)}">${esc(text || status[0].toUpperCase() + status.slice(1))}</span>`;
+  const flag = (text, kind) => `<span class="flag ${kind ? "flag--" + kind : ""}">${esc(text)}</span>`;
+  const notice = (kind, text) => `<p class="notice notice--${kind}" role="${kind === "err" ? "alert" : "status"}">${esc(text)}</p>`;
+  const opt = (value, label, sel) => `<option value="${esc(value)}" ${String(value) === String(sel ?? "") ? "selected" : ""}>${esc(label)}</option>`;
+  const field = (id, label, input, extra = "") => `<div class="field" ${extra}><label for="${id}">${label}</label>${input}</div>`;
+
+  async function api(path, body) {
+    const opts = { credentials: "same-origin", headers: {} };
+    if (body !== undefined) {
+      opts.method = "POST";
+      opts.headers["Content-Type"] = "application/json";
+      opts.headers["X-LNA"] = "1";
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch("/lna/api" + path, opts);
+    if (res.status === 401) { location.href = "/lna/login?m=expired"; throw new Error("signed out"); }
+    if (res.status === 403) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || "Not allowed.");
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
+    return data;
+  }
+
+  function openDialog(html, wide) { dlg.classList.toggle("wide", Boolean(wide)); dlgBody.innerHTML = html; dlg.showModal(); const f = dlgBody.querySelector("input,select,textarea,button"); if (f) f.focus(); }
+  function closeDialog() { dlg.close(); dlgBody.innerHTML = ""; }
+  function confirmBox(title, text, okLabel, danger) {
+    return new Promise((resolve) => {
+      openDialog(`<h2>${esc(title)}</h2><p class="dim">${esc(text)}</p>
+        <div class="head mt"><span></span><span class="stat">
+          <button class="btn btn--quiet" data-dlg="no">Cancel</button>
+          <button class="btn ${danger ? "btn--danger" : ""}" data-dlg="yes">${esc(okLabel)}</button></span></div>`);
+      dlgBody.onclick = (e) => { const b = e.target.closest("[data-dlg]"); if (!b) return; dlgBody.onclick = null; closeDialog(); resolve(b.dataset.dlg === "yes"); };
+    });
+  }
+  dlg.addEventListener("click", (e) => {
+    if (e.target.closest("[data-dlg-close]")) closeDialog();
+    const c = e.target.closest("[data-dlg-copy]");
+    if (c) navigator.clipboard.writeText(document.getElementById("secretVal").textContent).then(() => { c.textContent = "Copied"; });
+  });
+
+  // ---- notifications (bell) --------------------------------------------------------
+  function setBell(n) { const b = document.getElementById("bellCount"); b.hidden = !n; b.textContent = n > 99 ? "99+" : n; }
+  async function openBell() {
+    const d = await api("/notifications");
+    openDialog(`<div class="head"><h2>Notifications</h2><button class="btn btn--quiet btn--sm" data-dlg-close>Close</button></div>
+      ${d.items.length ? `<ul class="notes">${d.items.map((n) => `<li><button data-note-link="${esc(n.link || "")}" class="${n.read_at ? "" : "new"}">${esc(n.text)}<time>${fmtWhen(n.created_at)}</time></button></li>`).join("")}</ul>` : `<p class="empty">Nothing yet.</p>`}`, true);
+    if (d.unread) { await api("/notifications/read", {}); setBell(0); }
+  }
+  document.getElementById("bell").addEventListener("click", () => openBell().catch(() => {}));
+  dlg.addEventListener("click", (e) => {
+    const n = e.target.closest("[data-note-link]");
+    if (!n) return;
+    closeDialog();
+    if (n.dataset.noteLink) { if (location.hash.slice(1) === n.dataset.noteLink) go(current()); else location.hash = n.dataset.noteLink; }
+  });
+  setInterval(() => { if (!document.hidden) api("/notifications").then((d) => setBell(d.unread)).catch(() => {}); }, 60000);
+
+  // ---- tabs -------------------------------------------------------------------------
+  function tabsFor(role) {
+    const t = [["today", "Today"], ["leave", "Leave"]];
+    if (role !== "employee") t.push(["approvals", "Approvals"], ["team", "Team"], ["reports", "Reports"]);
+    if (role === "admin") t.push(["people", "People"], ["settings", "Settings"], ["activity", "Activity"]);
+    t.push(["account", "Account"]);
+    return t;
+  }
+  function renderTabs(active) {
+    document.getElementById("tabs").innerHTML = tabsFor(ME.user.role).map(([k, label]) =>
+      `<button class="tab" role="tab" aria-selected="${k === active}" data-tab="${k}">${label}${k === "approvals" && ME.pendingApprovals ? `<span class="badge">${ME.pendingApprovals}</span>` : ""}</button>`).join("");
+  }
+  function current() { const h = location.hash.slice(1); return tabsFor(ME.user.role).some(([k]) => k === h) ? h : "today"; }
+  async function go(tab, keepFlash) {
+    if (!keepFlash) FLASH = null;
+    if (TIMER) { clearInterval(TIMER); TIMER = null; }
+    ME = await api("/me");
+    setBell(ME.unread);
+    renderTabs(tab);
+    try { await VIEWS[tab](); } catch (err) { view.innerHTML = notice("err", err.message); }
+  }
+  function flash(kind, text) { FLASH = { kind, text }; }
+  const flashHtml = () => FLASH ? notice(FLASH.kind, FLASH.text) : "";
+
+  // ---- Today ------------------------------------------------------------------------
+  function greeting() { const h = +new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; }
+  const approverName = () => ME.user.role === "employee" ? (ME.user.manager ? ME.user.manager : "an admin") : "an admin";
+  const shiftLine = () => `Shift ${ME.shift.start}–${ME.shift.end}${ME.shift.grace ? ` · late after ${hhmmLate()}` : ""}`;
+  const hhmmLate = () => { const m = toMin(ME.shift.start) + ME.shift.grace; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
+
+  function todayCard() {
+    const a = ME.attendance;
+    if (ME.onLeave && !ME.onLeave.half_day) return `<p class="big">On leave</p><p class="dim">${esc(ME.onLeave.type)} today. Enjoy it.</p>`;
+    if (a) {
+      const mode = a.mode === "office" ? "Office" : "Work from home";
+      const st = a.mode === "wfh" ? (a.status === "pending" ? chip("pending", `Waiting for ${approverName()}`) : a.status === "approved" ? chip("approved", "Approved") : chip("rejected", "Not approved")) : "";
+      const flags = [a.late ? flag("Late arrival") : "", a.early ? flag("Left early") : "", a.day_status ? flag(DAY_STATUS[a.day_status], a.day_status === "present" ? "info" : a.day_status === "short" ? "bad" : "") : ""].join("");
+      const remind = !a.check_out_at && ME.nowMin >= toMin(ME.shift.end) + 30 ? notice("info", `Your shift ended at ${ME.shift.end}. Remember to check out.`) : "";
+      return `${remind}<div class="stat"><p class="big">${mode}</p>${st}</div>
+        <p class="dim">Checked in at ${fmtTime(a.check_in_at)}${a.check_out_at ? ` · checked out at ${fmtTime(a.check_out_at)} · ${fmtHours(a.worked_min)} worked` : ""}</p>
+        ${flags ? `<p>${flags}</p>` : ""}
+        ${a.review_note ? `<p class="fine">Note: ${esc(a.review_note)}</p>` : ""}
+        ${a.check_out_at ? "" : `<button class="btn btn--ghost mt" data-act="check-out">Check out</button>`}
+        <p class="fine mt">${shiftLine()}</p>`;
+    }
+    const off = ME.holiday ? `Today is a holiday (${esc(ME.holiday)}).` : ME.weekend ? "It's your weekly day off." : "";
+    const half = ME.onLeave && ME.onLeave.half_day ? `<p class="dim">You're on a half day of ${esc(ME.onLeave.type.toLowerCase())} today.</p>` : "";
+    return `${half}${off ? `<p class="dim">${off} You can still check in if you're working.</p>` : `<p class="dim">You haven't checked in yet.</p>`}
+      <div class="punch">
+        <button data-act="check-in" data-mode="office"><b>Office</b><span>${ME.officeCheck ? "Your location is checked once" : "I'm working from the office"}</span></button>
+        <button data-act="check-in" data-mode="wfh"><b>Work from home</b><span>Needs approval from ${esc(approverName())}</span></button>
+      </div>
+      <p class="fine mt">${shiftLine()}</p>`;
+  }
+
+  async function calendarHtml() {
+    const d = await api("/month?month=" + CAL_MONTH);
+    const [y, m] = d.month.split("-").map(Number);
+    const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+    const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const att = Object.fromEntries(d.attendance.map((a) => [a.date, a]));
+    const hol = Object.fromEntries(d.holidays.map((h) => [h.date, h.name]));
+    const cells = [];
+    const lead = (first + 6) % 7; // weeks start Monday
+    for (let i = 0; i < lead; i++) cells.push(`<div class="day day--blank"></div>`);
+    for (let n = 1; n <= days; n++) {
+      const ds = `${d.month}-${String(n).padStart(2, "0")}`;
+      const wd = new Date(ds + "T00:00:00Z").getUTCDay();
+      const lv = d.leaves.find((l) => l.start_date <= ds && l.end_date >= ds && !(d.weekend.includes(wd) || hol[ds]));
+      const a = att[ds];
+      let cls = "", label = "", flags = "";
+      if (a) {
+        if (a.mode === "office") { cls = "office"; label = "Office"; }
+        else if (a.status === "approved") { cls = "wfh"; label = "WFH"; }
+        else if (a.status === "pending") { cls = "pending"; label = "WFH pending"; }
+        else { cls = "absent"; label = "WFH declined"; }
+        if (a.late) flags += flag("Late");
+        if (a.day_status === "half_day") flags += flag("Half");
+        else if (a.day_status === "short") flags += flag("Short", "bad");
+        else if (!a.check_out_at && ds < d.today) flags += flag("No out", "bad");
+      }
+      else if (hol[ds]) { cls = "off"; label = hol[ds]; }
+      else if (lv && lv.status === "approved") { cls = "leave"; label = lv.half_day ? "Half day" : "Leave"; }
+      else if (lv) { cls = "pending"; label = "Leave pending"; }
+      else if (d.weekend.includes(wd)) { cls = "off"; }
+      else if (ds < d.today && ds >= d.since) { cls = "absent"; label = "No record"; }
+      cells.push(`<div class="day ${cls ? "day--" + cls : ""} ${ds === d.today ? "day--today" : ""}"><span class="day__n">${n}</span><span class="day__t">${esc(label)}</span>${flags}</div>`);
+    }
+    const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+    const [ny, nm] = m === 12 ? [y + 1, 1] : [y, m + 1];
+    const mk = (yy, mm) => `${yy}-${String(mm).padStart(2, "0")}`;
+    const days2 = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cal__dow">${x}</div>`).join("");
+    return `<div class="head"><h2>${MONTHS[m - 1]} ${y}</h2><span class="stat">
+        <button class="btn btn--quiet btn--sm" data-act="cal" data-month="${mk(py, pm)}" aria-label="Previous month">‹</button>
+        <button class="btn btn--quiet btn--sm" data-act="cal" data-month="${d.today.slice(0, 7)}">This month</button>
+        <button class="btn btn--quiet btn--sm" data-act="cal" data-month="${mk(ny, nm)}" aria-label="Next month">›</button></span></div>
+      <div class="cal">${days2}${cells.join("")}</div>
+      <div class="legend"><span><i class="day--office"></i>Office</span><span><i class="day--wfh"></i>Work from home</span><span><i class="day--pending"></i>Waiting for approval</span><span><i class="day--leave"></i>Leave</span><span><i class="day--absent"></i>No record</span><span><i class="day--off"></i>Day off / holiday</span></div>`;
+  }
+
+  function correctionDialog(date, kind) {
+    openDialog(`<h2>Correct your attendance</h2>
+      <p class="dim">For a day you forgot to check in or out, or checked in at the wrong time. It goes to ${esc(approverName())} for approval.</p>
+      <form data-form="correction" class="mt">
+        ${field("cd", "Date", `<input class="input" id="cd" name="date" type="date" required max="${ME.today}" min="${ME.user.since > addDaysLocal(ME.today, -60) ? ME.user.since : addDaysLocal(ME.today, -60)}" value="${esc(date || "")}">`)}
+        ${field("ck", "What needs correcting", `<select class="input" id="ck" name="kind">${opt("out", "Check-out time", kind)}${opt("in", "Check-in time", kind)}${opt("both", "Both (or the whole day is missing)", kind)}</select>`)}
+        <div class="grid g2">
+          ${field("ci", "Check-in time", `<input class="input" id="ci" name="check_in" type="time">`, `data-for="in both"`)}
+          ${field("co", "Check-out time", `<input class="input" id="co" name="check_out" type="time">`, `data-for="out both"`)}
+        </div>
+        ${field("cm", "Where were you working?", `<select class="input" id="cm" name="mode">${opt("office", "Office")}${opt("wfh", "Work from home")}</select><p class="fine">Only used if there's no record for that day at all.</p>`, `data-for="both"`)}
+        ${field("cr", "What happened?", `<textarea class="input" id="cr" name="reason" maxlength="300" required placeholder="e.g. Forgot to check out before leaving"></textarea>`)}
+        <div class="head mt"><span></span><span class="stat"><button class="btn btn--quiet" type="button" data-dlg-close>Cancel</button><button class="btn" type="submit">Send request</button></span></div>
+      </form>`);
+    const sel = document.getElementById("ck");
+    const sync = () => dlgBody.querySelectorAll("[data-for]").forEach((el) => { const on = el.dataset.for.split(" ").includes(sel.value); el.hidden = !on; const i = el.querySelector("input"); if (i) i.required = on; });
+    sel.addEventListener("change", sync); sync();
+  }
+  function addDaysLocal(s, n) { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+
+  const VIEWS = {};
+  VIEWS.today = async () => {
+    CAL_MONTH = CAL_MONTH || ME.today.slice(0, 7);
+    const pend = ME.user.role !== "employee" && ME.pendingApprovals
+      ? notice("info", `${ME.pendingApprovals} request${ME.pendingApprovals === 1 ? " is" : "s are"} waiting for your approval.`) : "";
+    const open = ME.openDays.length ? `<div class="notice notice--err" role="alert">You didn't check out on ${ME.openDays.map(fmtDate).join(", ")}.
+        ${ME.openDays.map((d) => `<button class="btn btn--quiet btn--sm" data-act="correct" data-date="${d}" data-kind="out">Fix ${fmtDate(d)}</button>`).join(" ")}</div>` : "";
+    const corr = await api("/corrections");
+    const crow = corr.items.map((c) => {
+      const what = c.kind === "in" ? `Check-in ${hhmmIST(c.check_in_at)}` : c.kind === "out" ? `Check-out ${hhmmIST(c.check_out_at)}` : `${hhmmIST(c.check_in_at)}–${hhmmIST(c.check_out_at)}${c.mode ? ` (${c.mode === "wfh" ? "WFH" : "office"})` : ""}`;
+      return `<tr><td>${fmtDate(c.date)}</td><td>${what}</td><td>${chip(c.status, c.status === "pending" ? "Waiting" : null)}${c.reviewer ? `<div class="fine">by ${esc(c.reviewer)}${c.review_note ? ` — ${esc(c.review_note)}` : ""}</div>` : ""}</td>
+        <td class="actions">${c.status === "pending" ? `<button class="btn btn--quiet btn--sm" data-act="cancel-correction" data-id="${c.id}">Withdraw</button>` : ""}</td></tr>`;
+    }).join("");
+    view.innerHTML = `${flashHtml()}${pend}${open}
+      <div class="head"><div><p class="eyebrow">${fmtDate(ME.today)}</p><h1>${greeting()}, ${esc(ME.user.name.split(" ")[0])}</h1></div></div>
+      <div class="grid g2">
+        <div>
+          <section class="card"><h2>Today</h2>${todayCard()}</section>
+          <section class="card mt"><div class="head"><h2>Corrections</h2><button class="btn btn--ghost btn--sm" data-act="correct">Request a correction</button></div>
+            ${crow ? `<div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th>Change</th><th>Status</th><th></th></tr></thead><tbody>${crow}</tbody></table></div>` : `<p class="dim">Forgot to check in or out? Request a correction and ${esc(approverName())} can approve it.</p>`}
+          </section>
+        </div>
+        <section class="card" id="calCard"><p class="empty">Loading calendar…</p></section>
+      </div>`;
+    document.getElementById("calCard").innerHTML = await calendarHtml();
+  };
+
+  // ---- Leave ------------------------------------------------------------------------
+  let LEAVE_TYPES = [];
+  VIEWS.leave = async () => {
+    const d = await api("/leave");
+    LEAVE_TYPES = d.balances;
+    const types = d.balances.map((b) => `<option value="${b.id}">${esc(b.name)}${b.remaining === null ? "" : ` (${b.remaining} available)`}</option>`).join("");
+    const bal = d.balances.map((b) => `<div class="bal"><p>${esc(b.name)}</p>
+        <div class="bal__n">${b.remaining === null ? "No limit" : esc(b.remaining)}</div>
+        <p>${b.quota === null ? `${b.approved} taken this year` : b.accrual !== "yearly" ? `available · ${b.earned} of ${b.quota} given so far${b.accrual === "days" ? ` (1 per ${b.accrual_days} days)` : ""} · ${b.approved} taken` : `left of ${b.quota} · ${b.approved} taken`}${b.pending ? ` · ${b.pending} pending` : ""}</p></div>`).join("");
+    const docRules = d.balances.filter((b) => b.doc_after_days !== null).map((b) => `${esc(b.name)} over ${fmtDays(b.doc_after_days)}`).join(", ");
+    const rows = d.requests.map((r) => {
+      const canCancel = r.status === "pending" || (r.status === "approved" && r.start_date > d.today);
+      return `<tr><td>${fmtRange(r.start_date, r.end_date)}${r.half_day ? " (half day)" : ""}</td><td>${esc(r.type)}${r.doc_name ? `<div class="fine"><a href="/lna/api/leave/${r.id}/document">${esc(r.doc_name)}</a></div>` : ""}</td><td>${r.days}</td>
+        <td>${chip(r.status)}${r.reviewer ? `<div class="fine">by ${esc(r.reviewer)}${r.review_note ? ` — ${esc(r.review_note)}` : ""}</div>` : ""}</td>
+        <td class="actions">${canCancel ? `<button class="btn btn--quiet btn--sm" data-act="cancel-leave" data-id="${r.id}">Cancel</button>` : ""}</td></tr>`;
+    }).join("");
+    const wfh = d.wfh.map((a) => `<tr><td>${fmtDate(a.date)}</td><td>${fmtTime(a.check_in_at)}</td>
+        <td>${chip(a.status, a.status === "approved" ? "Approved" : a.status === "pending" ? "Waiting" : "Not approved")}${a.reviewer ? `<div class="fine">by ${esc(a.reviewer)}${a.review_note ? ` — ${esc(a.review_note)}` : ""}</div>` : ""}</td></tr>`).join("");
+    const minStart = d.since > `${d.today.slice(0, 4)}-01-01` ? d.since : `${d.today.slice(0, 4)}-01-01`;
+    view.innerHTML = `${flashHtml()}
+      <div class="head"><div><p class="eyebrow">${d.year}</p><h1>Leave</h1></div></div>
+      <div class="grid g3">${bal}</div>
+      <div class="grid g2 mt">
+        <section class="card"><h2>Apply for leave</h2>
+          <form data-form="leave">
+            ${field("lt", "Type", `<select class="input" id="lt" name="leave_type_id" required>${types}</select>`)}
+            <div class="grid g2">
+              ${field("ls", "From", `<input class="input" id="ls" name="start_date" type="date" required min="${minStart}">`)}
+              ${field("le", "To", `<input class="input" id="le" name="end_date" type="date" required>`)}
+            </div>
+            <label class="check"><input type="checkbox" name="half_day"> Half day (one date only)</label>
+            ${field("lr", "Reason (optional)", `<textarea class="input" id="lr" name="reason" maxlength="500"></textarea>`)}
+            ${field("ld", "Supporting document (optional)", `<input class="input" id="ld" name="doc" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><p class="fine">PDF, JPG or PNG, up to 1 MB.${docRules ? ` Needed for ${docRules}.` : ""}</p>`)}
+            <p class="fine">Weekly days off and holidays aren't counted. It goes to ${esc(approverName())} for approval.</p>
+            <button class="btn mt" type="submit">Send request</button>
+          </form>
+        </section>
+        <section class="card"><h2>Work from home days</h2>
+          ${wfh ? `<div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th>Checked in</th><th>Status</th></tr></thead><tbody>${wfh}</tbody></table></div>` : `<p class="empty">None yet. Choose "Work from home" when you check in.</p>`}
+        </section>
+      </div>
+      <section class="card mt"><h2>My leave requests</h2>
+        ${rows ? `<div class="scroll"><table class="tbl"><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">No leave requested yet.</p>`}
+      </section>`;
+    const s = document.getElementById("ls"), e = document.getElementById("le");
+    s.addEventListener("change", () => { if (!e.value || e.value < s.value) e.value = s.value; e.min = s.value; });
+  };
+
+  // ---- Approvals ------------------------------------------------------------------
+  VIEWS.approvals = async () => {
+    const d = await api("/approvals");
+    const items = d.items.map((r) => {
+      let what;
+      if (r.kind === "leave") {
+        what = `<p><b>${esc(r.type)}</b> · ${fmtRange(r.start_date, r.end_date)}${r.half_day ? " (half day)" : ""} · ${fmtDays(r.days)}</p>${r.reason ? `<p class="dim">“${esc(r.reason)}”</p>` : ""}
+          ${r.doc_name ? `<p class="fine"><a href="/lna/api/leave/${r.id}/document">Open ${esc(r.doc_name)}</a></p>` : ""}`;
+      } else if (r.kind === "wfh") {
+        what = `<p><b>Work from home</b> · ${fmtDate(r.start_date)}</p><p class="dim">Checked in at ${fmtTime(r.created_at)}</p>`;
+      } else {
+        const was = r.was_in ? `${hhmmIST(r.was_in)}–${r.was_out ? hhmmIST(r.was_out) : "no check-out"}` : "no record";
+        const now = `${hhmmIST(r.check_in_at || r.was_in) || "?"}–${hhmmIST(r.check_out_at || r.was_out) || "no check-out"}`;
+        what = `<p><b>Attendance correction</b> · ${fmtDate(r.start_date)}</p>
+          <p class="dim">Recorded: ${was} → requested: ${now}${!r.was_in && r.mode ? ` (${r.mode === "wfh" ? "work from home" : "office"})` : ""}</p>
+          <p class="dim">“${esc(r.reason)}”</p>`;
+      }
+      return `<section class="card req">
+        <div><p class="fine">${ROLE[r.role]}${r.department ? ` · ${esc(r.department)}` : ""} · asked ${fmtWhen(r.created_at)}</p><h2>${esc(r.name)}</h2>${what}</div>
+        <form class="req__acts" data-form="decide" data-kind="${r.kind}" data-id="${r.id}">
+          <label class="sr" for="n-${r.kind}-${r.id}">Note</label>
+          <input class="input" id="n-${r.kind}-${r.id}" name="note" placeholder="Note (optional)" maxlength="300">
+          <span class="stat"><button class="btn btn--sm" name="decision" value="approved">Approve</button>
+          <button class="btn btn--danger btn--sm" name="decision" value="rejected">Reject</button></span>
+        </form></section>`;
+    }).join("");
+    view.innerHTML = `${flashHtml()}<div class="head"><div><p class="eyebrow">Waiting for you</p><h1>Approvals</h1></div></div>
+      <p class="dim">${ME.user.role === "manager" ? "Leave, work-from-home and correction requests from the people who report to you. Your own requests go to an admin." : "Requests from managers come to admins only. Employees' requests can be decided by their manager or any admin."}</p>
+      <div class="stack mt">${items || `<p class="empty">Nothing waiting. All caught up.</p>`}</div>`;
+  };
+
+  // ---- Team: live dashboard ---------------------------------------------------------
+  VIEWS.team = async () => {
+    TEAM_DATE = TEAM_DATE || ME.today;
+    const d = await api(`/team?date=${TEAM_DATE}&department=${encodeURIComponent(TEAM_DEPT)}`);
+    const c = d.counts, live = d.date === d.today;
+    const missing = live && c.notIn ? [c.notIn, "Not checked in yet", "warn"] : [c.absent, "Absent", c.absent ? "bad" : ""];
+    const tiles = [
+      [c.total, "People", ""], [c.present, "Checked in", "good"], [c.office, "At the office", "good"], [c.wfh, "Working from home", "good"],
+      [c.onLeave, "On leave", ""], [c.late, "Late arrivals", c.late ? "warn" : ""], missing,
+      [c.notOut, "Didn't check out", c.notOut ? "bad" : ""], [c.early, "Left early", c.early ? "warn" : ""],
+      [c.pendingLeave + c.pendingWfh + c.pendingCorrections, "Requests waiting", c.pendingLeave + c.pendingWfh + c.pendingCorrections ? "warn" : ""],
+    ].map(([n, label, k]) => `<div class="tile ${k ? "tile--" + k : ""}"><b>${n}</b><span>${label}</span></div>`).join("");
+    const rows = d.people.map((p) => {
+      let st;
+      if (p.check_in_at) {
+        st = p.mode === "office" ? chip("approved", "Office") : chip(p.att_status, `WFH · ${p.att_status === "pending" ? "waiting" : p.att_status === "approved" ? "approved" : "declined"}`);
+      } else if (p.leave_type) st = chip("neutral", `On leave · ${p.leave_type}`);
+      else if (p.flag === "absent") st = chip("rejected", "Absent");
+      else if (p.flag) st = `<span class="dim">Not checked in</span>`;
+      else st = `<span class="dim">Day off</span>`;
+      const flags = [p.late ? flag("Late") : "", p.early ? flag("Left early") : "", p.flag === "not_out" ? flag("No check-out", "bad") : "", p.flag === "not_in_late" ? flag("Past start time") : "",
+        p.day_status ? flag(DAY_STATUS[p.day_status], p.day_status === "present" ? "info" : p.day_status === "short" ? "bad" : "") : "", p.corrected ? flag("Corrected", "info") : ""].join("");
+      return `<tr><td><b>${esc(p.name)}</b><div class="fine">${esc([p.employee_code, p.designation].filter(Boolean).join(" · ") || p.email)}</div></td>
+        <td>${esc(p.department || "—")}</td><td>${st}${flags ? `<div>${flags}</div>` : ""}</td>
+        <td>${fmtTime(p.check_in_at)}</td><td>${fmtTime(p.check_out_at)}</td><td>${fmtHours(p.worked_min)}</td></tr>`;
+    }).join("");
+    const deptSel = d.departments.length > 1 || TEAM_DEPT
+      ? field("tdept", "Department", `<select class="input" id="tdept">${opt("", "All departments", TEAM_DEPT)}${d.departments.map((x) => opt(x, x, TEAM_DEPT)).join("")}</select>`) : "";
+    view.innerHTML = `<div class="head"><div><p class="eyebrow">${ME.user.role === "admin" ? "Everyone" : "Reporting to you"}${live ? " · live" : ""}</p><h1>Team</h1></div>
+        <div class="filters">${deptSel}${field("td", "Date", `<input class="input" id="td" type="date" value="${d.date}" max="${d.today}">`)}</div></div>
+      ${d.holiday ? notice("info", `${fmtDate(d.date)} is a holiday: ${d.holiday}.`) : d.weekend ? notice("info", `${fmtDate(d.date)} is a weekly day off.`) : ""}
+      ${d.birthdays.length ? notice("ok", `Birthday today: ${d.birthdays.join(", ")}.`) : ""}
+      <div class="tiles">${tiles}</div>
+      <section class="card">${rows ? `<div class="scroll"><table class="tbl"><thead><tr><th>Person</th><th>Department</th><th>Status</th><th>In</th><th>Out</th><th>Hours</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">${ME.user.role === "admin" ? "Nobody here yet." : "Nobody reports to you yet. An admin sets this up under People."}</p>`}
+        ${live ? `<p class="fine mt">Updates every 30 seconds. Shift ${d.shift.start}–${d.shift.end}.</p>` : ""}</section>
+      <section class="card mt" id="balCard"><div class="head"><h2>Leave balances</h2><button class="btn btn--ghost btn--sm" data-act="team-balances">Show</button></div></section>`;
+    document.getElementById("td").addEventListener("change", (e) => { TEAM_DATE = e.target.value || ME.today; VIEWS.team(); });
+    const ds = document.getElementById("tdept");
+    if (ds) ds.addEventListener("change", (e) => { TEAM_DEPT = e.target.value; VIEWS.team(); });
+    if (!live && TIMER) { clearInterval(TIMER); TIMER = null; }
+    if (live && !TIMER) TIMER = setInterval(() => { if (current() === "team" && !dlg.open && !document.hidden) VIEWS.team().catch(() => {}); }, 30000);
+  };
+  async function teamBalances() {
+    const d = await api("/team/balances");
+    const names = d.people[0] ? d.people[0].balances.map((b) => b.name) : [];
+    const rows = d.people.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="fine">${esc(p.department || "")}</div></td>${p.balances.map((b) =>
+      `<td>${b.remaining === null ? `${b.approved} taken` : `<b>${b.remaining}</b> <span class="fine">of ${b.earned}${b.pending ? ` · ${b.pending} pending` : ""}</span>`}</td>`).join("")}</tr>`).join("");
+    document.getElementById("balCard").innerHTML = `<h2>Leave balances ${d.year}</h2>${rows ? `<div class="scroll"><table class="tbl"><thead><tr><th>Person</th>${names.map((n) => `<th>${esc(n)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div><p class="fine">Available days, out of what has been given so far this year.</p>` : `<p class="empty">Nobody to show.</p>`}`;
+  }
+
+  // ---- Reports ---------------------------------------------------------------------
+  const REPORT_TYPES = { summary: "Summary per person", detail: "Day-by-day attendance", leave: "Leave" };
+  function reportQuery(fmt) {
+    const q = new URLSearchParams({ type: REPORT.type, from: REPORT.from, to: REPORT.to });
+    if (REPORT.person) q.set("person", REPORT.person);
+    if (REPORT.department) q.set("department", REPORT.department);
+    if (fmt) q.set("format", fmt);
+    return q.toString();
+  }
+  VIEWS.reports = async () => {
+    REPORT = REPORT || { type: "summary", from: ME.today.slice(0, 8) + "01", to: ME.today, person: "", department: "" };
+    const d = await api("/reports?" + reportQuery());
+    const table = d.rows.length
+      ? `<div class="scroll"><table class="tbl"><thead><tr>${d.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${d.rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+      : `<p class="empty">Nothing in this range.</p>`;
+    view.innerHTML = `${flashHtml()}<div class="head"><div><p class="eyebrow">${ME.user.role === "admin" ? "Everyone" : "Reporting to you"}</p><h1>Reports</h1></div></div>
+      <section class="card"><form data-form="report" class="filters">
+        ${field("rt", "Report", `<select class="input" id="rt" name="type">${Object.entries(REPORT_TYPES).map(([k, v]) => opt(k, v, REPORT.type)).join("")}</select>`)}
+        ${field("rf", "From", `<input class="input" id="rf" name="from" type="date" required value="${REPORT.from}">`)}
+        ${field("rto", "To", `<input class="input" id="rto" name="to" type="date" required value="${REPORT.to}">`)}
+        ${d.departments.length ? field("rd", "Department", `<select class="input" id="rd" name="department">${opt("", "All", REPORT.department)}${d.departments.map((x) => opt(x, x, REPORT.department)).join("")}</select>`) : ""}
+        ${field("rp", "Person", `<select class="input" id="rp" name="person">${opt("", "Everyone", REPORT.person)}${d.people.map((p) => opt(p.id, p.name, REPORT.person)).join("")}</select>`)}
+        <div class="field"><button class="btn" type="submit">Show</button></div>
+        <div class="field"><a class="btn btn--ghost" href="/lna/api/reports?${esc(reportQuery("csv"))}">Download CSV</a></div>
+      </form>
+      <p class="fine mt">CSV files open in Excel or Google Sheets. Use "Summary per person" for payroll.</p></section>
+      <section class="card mt"><h2>${esc(REPORT_TYPES[d.type])} · ${fmtRange(d.from, d.to)}</h2>${table}</section>`;
+  };
+
+  // ---- People (admin) ----------------------------------------------------------------
+  let PEOPLE = [];
+  const managerOptions = (selected, selfId) => `<option value="">No manager (admins approve)</option>` + PEOPLE
+    .filter((p) => p.active && p.role !== "employee" && p.id !== selfId)
+    .map((p) => `<option value="${p.id}" ${p.id === selected ? "selected" : ""}>${esc(p.name)} (${ROLE[p.role]})</option>`).join("");
+  const roleOptions = (sel) => ["employee", "manager", "admin"].map((r) => opt(r, ROLE[r], sel)).join("");
+  const deptList = () => `<datalist id="depts">${[...new Set(PEOPLE.map((p) => p.department).filter(Boolean))].sort().map((x) => `<option value="${esc(x)}"></option>`).join("")}</datalist>`;
+  const workInputs = (p = {}, k = "") => `
+    ${field(`wc${k}`, "Employee ID", `<input class="input" id="wc${k}" name="employee_code" maxlength="20" value="${esc(p.employee_code || "")}" placeholder="e.g. HX-001">`)}
+    ${field(`wd${k}`, "Department", `<input class="input" id="wd${k}" name="department" maxlength="60" list="depts" value="${esc(p.department || "")}">`)}
+    ${field(`wg${k}`, "Designation", `<input class="input" id="wg${k}" name="designation" maxlength="60" value="${esc(p.designation || "")}">`)}
+    ${field(`wj${k}`, "Joining date", `<input class="input" id="wj${k}" name="joining_date" type="date" value="${esc(p.joining_date || "")}">`)}`;
+
+  VIEWS.people = async () => {
+    const d = await api("/admin/people");
+    PEOPLE = d.people;
+    const rows = PEOPLE.map((p) => {
+      const tags = [];
+      if (!p.active) tags.push(chip("rejected", "Disabled"));
+      else if (!p.last_login_at) tags.push(chip("pending", "Not signed in yet"));
+      else tags.push(chip("approved", "Active"));
+      return `<tr><td><b>${esc(p.name)}</b><div class="fine">${esc(p.email)}</div></td><td>${esc(p.employee_code || "—")}</td>
+        <td>${esc(p.department || "—")}<div class="fine">${esc(p.designation || "")}</div></td><td>${ROLE[p.role]}</td><td>${esc(p.manager || "—")}</td>
+        <td>${tags.join(" ")}<div class="fine">${p.last_login_at ? "Last signed in " + fmtDate(p.last_login_at.slice(0, 10)) : "Never signed in"}</div></td>
+        <td class="actions"><button class="btn btn--quiet btn--sm" data-act="edit-person" data-id="${p.id}">Edit</button>
+        <button class="btn btn--quiet btn--sm" data-act="signout-person" data-id="${p.id}">Sign out</button>
+        <button class="btn ${p.active ? "btn--danger" : "btn--ghost"} btn--sm" data-act="toggle-person" data-id="${p.id}">${p.active ? "Disable" : "Enable"}</button></td></tr>`;
+    }).join("");
+    view.innerHTML = `${flashHtml()}<div class="head"><div><p class="eyebrow">${PEOPLE.filter((p) => p.active).length} active</p><h1>People</h1></div></div>
+      <section class="card"><h2>Add a person</h2>
+        <form data-form="add-person">
+          <div class="grid g3">
+            ${field("pn", "Full name", `<input class="input" id="pn" name="name" required maxlength="80">`)}
+            ${field("pe", "Email", `<input class="input" id="pe" name="email" type="email" required placeholder="name@hexalis.in">`)}
+            ${field("pr", "Role", `<select class="input" id="pr" name="role">${roleOptions("employee")}</select>`)}
+            ${field("pm", "Reports to", `<select class="input" id="pm" name="manager_id">${managerOptions(null)}</select>`)}
+            ${workInputs({}, "n")}
+            <div class="field"><span class="label">&nbsp;</span><button class="btn" type="submit">Create account</button></div>
+          </div>
+        </form>
+        <p class="fine">They sign in with their @hexalis.in Google account; there's no password to share. Leave and "missing" days count from the joining date, so set it for everyone.</p>
+      </section>${deptList()}
+      <section class="card mt"><div class="scroll"><table class="tbl"><thead><tr><th>Person</th><th>ID</th><th>Department</th><th>Role</th><th>Reports to</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  };
+
+  // ---- Settings (admin) -------------------------------------------------------------
+  VIEWS.settings = async () => {
+    const [t, h, s, em] = await Promise.all([api("/admin/leave-types"), api("/holidays"), api("/admin/settings"), api("/admin/email")]);
+    const EM_STATUS = { pending: ["pending", "Queued"], sending: ["pending", "Sending"], sent: ["approved", "Sent"], failed: ["rejected", "Failed"], expired: ["cancelled", "Not sent"] };
+    const mailRows = em.items.map((x) => `<tr><td>${fmtWhen(x.created_at)}</td><td>${esc(x.name || x.to_addr)}<div class="fine">${esc(x.to_addr)}</div></td><td>${esc(x.subject)}</td>
+        <td>${chip(...EM_STATUS[x.status])}${x.error ? `<div class="fine">${esc(x.error)}</div>` : ""}</td></tr>`).join("");
+    const emailCard = `<section class="card mt"><div class="head"><h2>Email notifications</h2><span class="stat">
+          ${em.mail.configured ? `<button class="btn btn--ghost btn--sm" data-act="email-test">Send me a test email</button>` : ""}
+          ${em.counts.failed ? `<button class="btn btn--quiet btn--sm" data-act="email-retry">Retry ${em.counts.failed} failed</button>` : ""}</span></div>
+        ${em.mail.configured
+          ? notice("ok", `Set up: sending as ${em.mail.from} through ${em.mail.host}:${em.mail.port}.`)
+          : notice("info", "Not set up yet, so emails are queued here but not sent (they're dropped after 24 hours). Add the SMTP settings from lna/README.md and restart.")}
+        <p class="dim">Sent for new requests, decisions, the evening check-out reminder and new accounts. Everyone can turn them off under Account.</p>
+        ${mailRows ? `<div class="scroll mt"><table class="tbl"><thead><tr><th>Queued</th><th>To</th><th>Subject</th><th>Status</th></tr></thead><tbody>${mailRows}</tbody></table></div>` : `<p class="empty">No emails yet.</p>`}
+      </section>`;
+    const st = s.settings, offs = st.weekend.split(",").filter(Boolean).map(Number);
+    const typeRows = t.types.map((x) => `<tr><td><form data-form="save-type" data-id="${x.id}" class="grid g3">
+        ${field(`tn${x.id}`, "Name", `<input class="input" id="tn${x.id}" name="name" value="${esc(x.name)}" required>`)}
+        ${field(`tq${x.id}`, "Days per year", `<input class="input" id="tq${x.id}" name="yearly_quota" type="number" min="0" max="366" step="0.5" value="${x.yearly_quota ?? ""}" placeholder="No limit">`)}
+        ${field(`ta${x.id}`, "Given", `<select class="input" id="ta${x.id}" name="accrual">${opt("yearly", "All on 1 January", x.accrual)}${opt("monthly", "Built up monthly", x.accrual)}${opt("days", "1 day every N days", x.accrual)}</select>`)}
+        ${field(`tev${x.id}`, "N (days)", `<input class="input" id="tev${x.id}" name="accrual_days" type="number" min="1" max="365" step="1" value="${x.accrual_days ?? ""}" placeholder="e.g. 20">`)}
+        ${field(`tdoc${x.id}`, "Document needed after (days)", `<input class="input" id="tdoc${x.id}" name="doc_after_days" type="number" min="0" max="366" step="0.5" value="${x.doc_after_days ?? ""}" placeholder="Never">`)}
+        <div class="field"><span class="label">&nbsp;</span><span class="stat"><label class="check"><input type="checkbox" name="active" ${x.active ? "checked" : ""}> In use</label><button class="btn btn--ghost btn--sm" type="submit">Save</button></span></div>
+      </form></td></tr>`).join("");
+    const hol = h.holidays.map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.name)}</td><td class="actions"><button class="btn btn--quiet btn--sm" data-act="remove-holiday" data-id="${x.id}">Remove</button></td></tr>`).join("");
+    view.innerHTML = `${flashHtml()}<div class="head"><div><p class="eyebrow">Admin</p><h1>Settings</h1></div></div>
+      <form data-form="settings">
+        <div class="grid g2">
+          <section class="card"><h2>Shift and working week</h2>
+            <div class="grid g2">
+              ${field("ss", "Shift starts", `<input class="input" id="ss" name="shift_start" type="time" required value="${esc(st.shift_start)}">`)}
+              ${field("se", "Shift ends", `<input class="input" id="se" name="shift_end" type="time" required value="${esc(st.shift_end)}">`)}
+              ${field("sg", "Late after (minutes of grace)", `<input class="input" id="sg" name="grace_min" type="number" min="0" max="180" required value="${esc(st.grace_min)}">`)}
+              ${field("si", "Sign out after idle (minutes)", `<input class="input" id="si" name="idle_minutes" type="number" min="10" max="720" required value="${esc(st.idle_minutes)}">`)}
+              ${field("sf", "Full day (hours)", `<input class="input" id="sf" name="full_day_hours" type="number" min="1" max="16" step="0.5" required value="${esc(st.full_day_hours)}">`)}
+              ${field("sh", "Half day (hours)", `<input class="input" id="sh" name="half_day_hours" type="number" min="0.5" max="12" step="0.5" required value="${esc(st.half_day_hours)}">`)}
+            </div>
+            <fieldset class="field"><legend class="label">Weekly days off</legend><div class="weekdays">${[1, 2, 3, 4, 5, 6, 0].map((n) => `<label class="check"><input type="checkbox" name="off_${n}" ${offs.includes(n) ? "checked" : ""}> ${DAYS[n]}</label>`).join("")}</div></fieldset>
+            <p class="fine">Under the half-day hours counts as "short hours". Changes apply to days recorded from now on.</p>
+          </section>
+          <section class="card"><h2>Office location check</h2>
+            <p class="dim">When on, an office check-in only works within this distance of the office. Your location is checked once at check-in; only the distance is kept. Set the radius to 0 to turn it off.</p>
+            <div class="grid g2 mt">
+              ${field("sla", "Latitude", `<input class="input" id="sla" name="office_lat" inputmode="decimal" value="${esc(st.office_lat)}" placeholder="e.g. 28.6139">`)}
+              ${field("slo", "Longitude", `<input class="input" id="slo" name="office_lon" inputmode="decimal" value="${esc(st.office_lon)}" placeholder="e.g. 77.2090">`)}
+              ${field("sr", "Radius (metres)", `<input class="input" id="sr" name="office_radius_m" type="number" min="0" max="5000" required value="${esc(st.office_radius_m)}">`)}
+              <div class="field"><span class="label">&nbsp;</span><button class="btn btn--quiet" type="button" data-act="use-location">Use my current location</button></div>
+            </div>
+            <p class="fine">Tip: 150–300 m works for most offices; phone location can be off by 50 m or more indoors.</p>
+          </section>
+        </div>
+        <button class="btn mt" type="submit">Save shift and office settings</button>
+      </form>
+      <section class="card mt"><h2>Leave types</h2>
+        <p class="dim">Leave "Days per year" blank for no limit (for example unpaid leave or absence). "1 day every N days" gives a day for every N days completed, up to the yearly total; "Built up monthly" gives 1/12 a month. Both count from 1 January or the joining date. Unused leave doesn't carry into the next year.</p>
+        <table class="tbl mt"><tbody>${typeRows}</tbody></table>
+        <form data-form="save-type" class="grid g3 mt">
+          ${field("tnn", "New leave type", `<input class="input" id="tnn" name="name" required placeholder="e.g. Maternity leave">`)}
+          ${field("tqn", "Days per year", `<input class="input" id="tqn" name="yearly_quota" type="number" min="0" max="366" step="0.5" placeholder="No limit">`)}
+          ${field("tan", "Given", `<select class="input" id="tan" name="accrual">${opt("yearly", "All on 1 January", null)}${opt("monthly", "Built up monthly", null)}${opt("days", "1 day every N days", null)}</select>`)}
+          ${field("tevn", "N (days)", `<input class="input" id="tevn" name="accrual_days" type="number" min="1" max="365" step="1" placeholder="e.g. 20">`)}
+          ${field("tdn", "Document needed after (days)", `<input class="input" id="tdn" name="doc_after_days" type="number" min="0" max="366" step="0.5" placeholder="Never">`)}
+          <div class="field"><span class="label">&nbsp;</span><button class="btn btn--ghost" type="submit">Add leave type</button></div>
+        </form>
+      </section>
+      <section class="card mt"><h2>Holidays</h2>
+        <form data-form="add-holiday" class="grid g3">
+          ${field("hd", "Date", `<input class="input" id="hd" name="date" type="date" required>`)}
+          ${field("hn", "Name", `<input class="input" id="hn" name="name" required maxlength="80">`)}
+          <div class="field"><span class="label">&nbsp;</span><button class="btn btn--ghost" type="submit">Add holiday</button></div>
+        </form>
+        ${hol ? `<table class="tbl mt"><tbody>${hol}</tbody></table>` : `<p class="empty">No holidays added for this year.</p>`}
+        <p class="fine">Payroll exports are under Reports.</p>
+      </section>${emailCard}`;
+  };
+
+  // ---- Activity (admin) --------------------------------------------------------------
+  const ACTIONS = {
+    "login.password": "Signed in", "login.google": "Signed in with Google", "login.failed": "Wrong password", "login.locked": "Account locked",
+    "password.changed": "Changed password", "password.temp_cancelled_by_google": "Temporary password cancelled (Google sign-in)",
+    "attendance.check_in": "Checked in", "attendance.check_out": "Checked out", "correction.requested": "Asked for a correction",
+    "correction.cancelled": "Withdrew a correction", "correction.approved": "Approved a correction", "correction.rejected": "Rejected a correction",
+    "leave.applied": "Applied for leave", "leave.cancelled": "Cancelled leave", "leave.approved": "Approved leave", "leave.rejected": "Rejected leave",
+    "leave.document_viewed": "Opened a leave document", "wfh.approved": "Approved work from home", "wfh.rejected": "Rejected work from home",
+    "profile.updated": "Updated their profile", "report.downloaded": "Downloaded a report", "admin.person_added": "Added a person",
+    "admin.person_updated": "Edited a person", "admin.password_reset": "Reset a password", "admin.leave_type_saved": "Saved a leave type",
+    "admin.holiday_added": "Added a holiday", "admin.holiday_removed": "Removed a holiday", "admin.settings_saved": "Changed settings",
+    "cli.person_added": "Account created from the terminal", "admin.signed_out_person": "Signed someone out everywhere", "profile.email_preference": "Changed email preference",
+    "admin.email_test": "Sent a test email", "admin.email_retry": "Retried failed emails",
+  };
+  const detailText = (s) => { if (!s) return ""; try { return Object.entries(JSON.parse(s)).filter(([, v]) => v !== null && v !== "").map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(" · "); } catch { return s; } };
+  VIEWS.activity = async (more) => {
+    if (!PEOPLE.length) PEOPLE = (await api("/admin/people")).people;
+    const before = more && AUDIT.items.length ? AUDIT.items[AUDIT.items.length - 1].id : "";
+    const d = await api(`/admin/audit?person=${AUDIT.person}&before=${before}`);
+    AUDIT.items = more ? AUDIT.items.concat(d.items) : d.items;
+    const rows = AUDIT.items.map((a) => `<tr><td>${fmtWhen(a.at)}</td><td>${esc(a.name || "—")}</td><td>${esc(ACTIONS[a.action] || a.action)}</td><td class="fine">${esc(detailText(a.detail))}</td></tr>`).join("");
+    view.innerHTML = `<div class="head"><div><p class="eyebrow">Admin</p><h1>Activity</h1></div>
+        <div class="filters">${field("ap", "Person", `<select class="input" id="ap">${opt("", "Everyone", AUDIT.person)}${PEOPLE.map((p) => opt(p.id, p.name, AUDIT.person)).join("")}</select>`)}</div></div>
+      <p class="dim">Every sign-in, request, decision and admin change, newest first.</p>
+      <section class="card mt">${rows ? `<div class="scroll"><table class="tbl"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="empty">Nothing recorded yet.</p>`}
+        ${d.items.length === 100 ? `<button class="btn btn--quiet mt" data-act="audit-more">Show older</button>` : ""}</section>`;
+    document.getElementById("ap").addEventListener("change", (e) => { AUDIT.person = e.target.value; VIEWS.activity(); });
+  };
+
+  // ---- Account ------------------------------------------------------------------------
+  VIEWS.account = async () => {
+    const u = ME.user;
+    const p = (await api("/profile")).profile;
+    const info = [["Email", p.email], ["Employee ID", p.employee_code], ["Department", p.department], ["Designation", p.designation],
+      ["Joined", p.joining_date ? fmtDate(p.joining_date) : ""], ["Reports to", p.manager || (u.role === "employee" ? "No manager (admins approve)" : "")],
+      ["Your requests go to", u.role === "employee" ? (u.manager ? u.manager + " or an admin" : "An admin") : "An admin"]]
+      .filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+    view.innerHTML = `${flashHtml()}<div class="head"><div><p class="eyebrow">${ROLE[u.role]}</p><h1>${esc(u.name)}</h1></div></div>
+      <div class="grid g2">
+        <div>
+          <section class="card"><h2>Details</h2><dl class="kv">${info}</dl>
+            <p class="fine mt">Your name, ID, department and joining date are set by an admin.</p>
+            <button class="btn btn--quiet mt" data-act="sign-out-others">Sign out of all other devices</button>
+          </section>
+          <section class="card mt"><h2>Email</h2>
+            <label class="check"><input type="checkbox" data-act="email-pref" ${p.email_notify ? "checked" : ""}> Email me about requests, decisions and reminders</label>
+            <p class="fine">Sent to ${esc(u.email)}. You sign in with your Google account; there's no separate password.</p>
+          </section>
+        </div>
+        <section class="card"><h2>Contact and emergency details</h2>
+          <p class="dim">Seen only by you and admins.</p>
+          <form data-form="profile" class="mt">
+            <div class="grid g2">
+              ${field("fp", "Mobile number", `<input class="input" id="fp" name="phone" type="tel" maxlength="20" value="${esc(p.phone || "")}" autocomplete="tel">`)}
+              ${field("fb", "Date of birth", `<input class="input" id="fb" name="dob" type="date" max="${ME.today}" value="${esc(p.dob || "")}">`)}
+            </div>
+            ${field("fa", "Address", `<textarea class="input" id="fa" name="address" maxlength="300" autocomplete="street-address">${esc(p.address || "")}</textarea>`)}
+            <div class="grid g2">
+              ${field("fen", "Emergency contact name", `<input class="input" id="fen" name="emergency_name" maxlength="80" value="${esc(p.emergency_name || "")}">`)}
+              ${field("fer", "Relationship", `<input class="input" id="fer" name="emergency_relation" maxlength="40" value="${esc(p.emergency_relation || "")}" placeholder="e.g. Mother">`)}
+            </div>
+            ${field("fep", "Emergency contact number", `<input class="input" id="fep" name="emergency_phone" type="tel" maxlength="20" value="${esc(p.emergency_phone || "")}">`)}
+            <p class="fine">Your birthday (day and month only) is shown to your team on the day.</p>
+            <button class="btn mt" type="submit">Save details</button>
+          </form>
+        </section>
+      </div>`;
+  };
+
+  // ---- actions ------------------------------------------------------------------------
+  async function run(fn, okText, then) {
+    try { await fn(); if (okText) flash("ok", okText); }
+    catch (err) { if (err.message !== "signed out" && err.message !== "change") flash("err", err.message); }
+    await go(then || current(), true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function position() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error("This browser can't share your location."));
+      navigator.geolocation.getCurrentPosition((p) => resolve(p.coords), (e) => reject(new Error(e.code === 1
+        ? "Location access is blocked. Allow it for this site in your browser settings, then try again."
+        : "Couldn't get your location. Try again, or check in as work from home.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+    });
+  }
+  async function fileToBase64(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+
+  document.addEventListener("click", async (e) => {
+    const tab = e.target.closest("[data-tab]");
+    if (tab) { if (location.hash.slice(1) === tab.dataset.tab) go(tab.dataset.tab); else location.hash = tab.dataset.tab; return; }
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    const id = Number(b.dataset.id);
+    switch (b.dataset.act) {
+      case "check-in": {
+        const mode = b.dataset.mode;
+        if (mode === "wfh" && !(await confirmBox("Work from home today?", `This sends today to ${approverName()} for approval.`, "Check in from home"))) return;
+        let where = {};
+        if (mode === "office" && ME.officeCheck) {
+          b.disabled = true;
+          try { const c = await position(); where = { lat: c.latitude, lon: c.longitude }; }
+          catch (err) { flash("err", err.message); return go("today", true); }
+        }
+        return run(async () => { const r = await api("/check-in", { mode, ...where }); if (r.late) flash("ok", "Checked in. This is marked as a late arrival."); },
+          mode === "office" ? "Checked in at the office." : "Checked in from home. Waiting for approval.");
+      }
+      case "check-out":
+        if (!(await confirmBox("Check out for today?", "You can't check in again today after this. If you check out by mistake, request a correction.", "Check out"))) return;
+        return run(() => api("/check-out", {}), "Checked out. See you tomorrow.");
+      case "cal": CAL_MONTH = b.dataset.month; document.getElementById("calCard").innerHTML = await calendarHtml(); return;
+      case "correct": return correctionDialog(b.dataset.date, b.dataset.kind || "out");
+      case "cancel-correction":
+        if (!(await confirmBox("Withdraw this correction?", "It won't be sent for approval.", "Withdraw", true))) return;
+        return run(() => api(`/corrections/${id}/cancel`, {}), "Correction withdrawn.");
+      case "cancel-leave":
+        if (!(await confirmBox("Cancel this leave?", "It will be withdrawn. You can apply again later.", "Cancel leave", true))) return;
+        return run(() => api(`/leave/${id}/cancel`, {}), "Leave cancelled.");
+      case "team-balances": b.disabled = true; return teamBalances().catch((err) => { document.getElementById("balCard").innerHTML = notice("err", err.message); });
+      case "audit-more": return VIEWS.activity(true);
+      case "email-pref": return run(() => api("/profile", { email_notify: b.checked }), b.checked ? "Emails turned on." : "Emails turned off. You'll still get security emails.");
+      case "email-test": b.disabled = true; return run(async () => { const r = await api("/admin/email/test", {}); flash("ok", `Test email sent to ${r.to}. Check the inbox (and spam).`); }, null);
+      case "email-retry": return run(async () => { const r = await api("/admin/email/retry", {}); flash("ok", `${r.count} email(s) queued again.`); }, null);
+      case "use-location":
+        try { const c = await position(); document.getElementById("sla").value = c.latitude.toFixed(6); document.getElementById("slo").value = c.longitude.toFixed(6); if (document.getElementById("sr").value === "0") document.getElementById("sr").value = "200"; }
+        catch (err) { openDialog(`<h2>Location</h2><p class="dim">${esc(err.message)}</p><div class="head mt"><span></span><button class="btn" data-dlg-close>OK</button></div>`); }
+        return;
+      case "edit-person": {
+        const p = PEOPLE.find((x) => x.id === id);
+        const contact = [["Mobile", p.phone], ["Emergency contact", [p.emergency_name, p.emergency_relation && `(${p.emergency_relation})`, p.emergency_phone].filter(Boolean).join(" ")]]
+          .filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+        openDialog(`<h2>Edit ${esc(p.name)}</h2><p class="fine">${esc(p.email)}</p>
+          <form data-form="edit-person" data-id="${p.id}" class="mt">
+            ${field("en", "Full name", `<input class="input" id="en" name="name" value="${esc(p.name)}" required maxlength="80">`)}
+            <div class="grid g2">
+              ${field("er", "Role", `<select class="input" id="er" name="role">${roleOptions(p.role)}</select>`)}
+              ${field("em2", "Reports to", `<select class="input" id="em2" name="manager_id">${managerOptions(p.manager_id, p.id)}</select>`)}
+              ${workInputs(p, "e")}
+            </div>
+            ${contact ? `<h3 class="mt">Contact (added by them)</h3><dl class="kv mt">${contact}</dl>` : ""}
+            <div class="head mt"><span></span><span class="stat"><button class="btn btn--quiet" type="button" data-dlg-close>Cancel</button><button class="btn" type="submit">Save</button></span></div>
+          </form>${deptList()}`, true);
+        return;
+      }
+      case "signout-person": {
+        const p = PEOPLE.find((x) => x.id === id);
+        if (!(await confirmBox(`Sign ${p.name} out everywhere?`, "For example if a laptop or phone is lost. They can sign in again with Google; to block them, disable the account instead.", "Sign out", true))) return;
+        return run(() => api(`/admin/people/${id}/sign-out`, {}), `${p.name} was signed out on every device.`);
+      }
+      case "toggle-person": {
+        const p = PEOPLE.find((x) => x.id === id);
+        if (p.active && !(await confirmBox(`Disable ${p.name}?`, "They're signed out immediately and can't sign in until you enable them again. Their records are kept.", "Disable", true))) return;
+        return run(() => api(`/admin/people/${id}`, { active: !p.active }), p.active ? `${p.name} disabled.` : `${p.name} enabled.`);
+      }
+      case "remove-holiday":
+        return run(() => api(`/admin/holidays/${id}/delete`, {}), "Holiday removed.");
+      case "sign-out-others":
+        return run(() => api("/sign-out-others", {}), "Signed out of all other devices.");
+    }
+  });
+
+  document.addEventListener("submit", async (e) => {
+    const f = e.target.closest("form[data-form]");
+    if (!f) return;
+    e.preventDefault();
+    const fd = new FormData(f);
+    const v = Object.fromEntries([...fd.entries()].filter(([, x]) => typeof x === "string"));
+    const btn = e.submitter;
+    const work = { employee_code: v.employee_code, department: v.department, designation: v.designation, joining_date: v.joining_date };
+    switch (f.dataset.form) {
+      case "leave": {
+        const file = fd.get("doc");
+        let doc;
+        if (file && file.size) {
+          if (file.size > 1024 * 1024) { flash("err", "Documents must be 1 MB or smaller."); return go("leave", true); }
+          doc = { name: file.name, data: await fileToBase64(file) };
+        }
+        return run(() => api("/leave", { ...v, half_day: fd.has("half_day"), leave_type_id: Number(v.leave_type_id), doc }), "Leave request sent.");
+      }
+      case "correction":
+        closeDialog();
+        return run(() => api("/corrections", v), "Correction sent for approval.", "today");
+      case "decide":
+        return run(() => api(`/approvals/${f.dataset.kind}/${f.dataset.id}`, { decision: btn.value, note: v.note }), btn.value === "approved" ? "Approved." : "Rejected.");
+      case "report":
+        REPORT = { type: v.type, from: v.from, to: v.to, person: v.person || "", department: v.department || "" };
+        return VIEWS.reports().catch((err) => { flash("err", err.message); go("reports", true); });
+      case "add-person":
+        try {
+          const r = await api("/admin/people", { name: v.name, email: v.email, role: v.role, manager_id: v.manager_id ? Number(v.manager_id) : null, ...work });
+          flash("ok", `Account created. ${r.email} can now sign in with Google.`); await go("people", true);
+        } catch (err) { flash("err", err.message); go("people", true); }
+        return;
+      case "edit-person":
+        closeDialog();
+        return run(() => api(`/admin/people/${f.dataset.id}`, { name: v.name, role: v.role, manager_id: v.manager_id ? Number(v.manager_id) : null, ...work }), "Saved.");
+      case "save-type":
+        return run(() => api("/admin/leave-types" + (f.dataset.id ? "/" + f.dataset.id : ""), {
+          name: v.name, yearly_quota: v.yearly_quota === "" ? null : Number(v.yearly_quota), accrual: v.accrual, accrual_days: v.accrual_days === "" ? null : Number(v.accrual_days),
+          doc_after_days: v.doc_after_days === "" ? null : Number(v.doc_after_days), active: f.dataset.id ? fd.has("active") : true,
+        }), "Leave type saved.");
+      case "settings": {
+        const weekend = [0, 1, 2, 3, 4, 5, 6].filter((n) => fd.has("off_" + n)).join(",");
+        const keys = ["shift_start", "shift_end", "grace_min", "idle_minutes", "full_day_hours", "half_day_hours", "office_lat", "office_lon", "office_radius_m"];
+        return run(() => api("/admin/settings", { ...Object.fromEntries(keys.map((k) => [k, v[k]])), weekend }), "Settings saved.");
+      }
+      case "add-holiday":
+        return run(() => api("/admin/holidays", v), "Holiday added.");
+      case "profile":
+        return run(() => api("/profile", v), "Details saved.");
+    }
+  });
+
+  window.addEventListener("hashchange", () => go(current()));
+  (async () => {
+    ME = await api("/me");
+    document.getElementById("who").innerHTML = `${esc(ME.user.name)} · ${ROLE[ME.user.role]}`;
+    go(current(), true);
+  })();
+})();
+</script>
+</body>
+</html>

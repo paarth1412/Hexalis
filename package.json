@@ -1,0 +1,16 @@
+{
+  "name": "hexalis-site",
+  "private": true,
+  "description": "HEXALIS website + /lna leave & attendance app",
+  "scripts": {
+    "build": "python3 build.py",
+    "dev": "python3 build.py && wrangler pages dev dist --port 8788",
+    "lna:migrate": "wrangler d1 migrations apply hexalis-lna --local",
+    "lna:migrate:live": "wrangler d1 migrations apply hexalis-lna --remote",
+    "lna:people": "node lna/scripts/people.mjs",
+    "deploy": "python3 build.py && wrangler pages deploy dist --project-name hexalis --branch main"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

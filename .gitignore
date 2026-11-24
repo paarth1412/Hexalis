@@ -2,3 +2,6 @@ dist/
 hexalis-site.zip
 __pycache__/
 .DS_Store
+node_modules/
+.wrangler/
+.dev.vars

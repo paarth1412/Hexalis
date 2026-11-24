@@ -193,7 +193,7 @@ def hexwheel():
 def wheel_panels():
     out = []
     for i, p in enumerate(PILLARS):
-        chips = "".join(f'<span class="chip">{e(s[0])}</span>' for s in p["streams"][:6])
+        chips = "".join(f'<span class="chip">{e(s[0])}</span>' for s in p["streams"])
         out.append(f'''
       <div class="wpanel__body{' is-active' if i == 0 else ''}" id="wp-{p['slug']}" role="tabpanel"
            aria-labelledby="wt-{p['slug']}">
@@ -291,7 +291,8 @@ def nav(current=""):
 def footer():
     pill_links = "".join(f'<li><a href="/{p["slug"]}.html">{e(p["name"])}</a></li>' for p in PILLARS)
     co_links = "".join(f'<li><a href="/{f}">{e(label)}</a></li>' for f, label, key in NAVIGATION if key != "pillars")
-    social = f'<li><a href="{SITE["instagram"]}" rel="me noopener" target="_blank">Instagram</a></li>' \
+    social = f'<li><a href="{SITE["linkedin"]}" rel="me noopener" target="_blank">LinkedIn</a></li>' \
+             f'<li><a href="{SITE["instagram"]}" rel="me noopener" target="_blank">Instagram</a></li>' \
              f'<li><a href="{SITE["threads"]}" rel="me noopener" target="_blank">Threads</a></li>'
     return f'''<footer class="foot">
   <div class="shell shell--wide">
@@ -460,7 +461,11 @@ def sec_scenarios():
 
 
 def cta_band(title="Bring us the part of the business that is not working.",
-             body="One conversation, no deck. If HEXALIS is not the right answer, we will tell you that too."):
+             body="One conversation, no deck. If HEXALIS is not the right answer, we will tell you that too.",
+             linkedin=False):
+    follow = (f'\n        <p class="cta__alt"><a href="{SITE["linkedin"]}" target="_blank" '
+              f'rel="noopener noreferrer" aria-label="Follow HEXALIS on LinkedIn (opens in a new tab)">'
+              f'Follow us on LinkedIn</a></p>') if linkedin else ""
     return f'''<section class="cta">
   <div class="shell shell--wide">
     <div class="cta__card">
@@ -472,7 +477,7 @@ def cta_band(title="Bring us the part of the business that is not working.",
       <div data-rise data-d="1">
         <p>{e(body)}</p>
         <a class="btn" href="/contact.html"><span>Start a conversation</span>{ARROW}</a>
-        <p class="cta__alt">Or write to <a href="mailto:{SITE['email']}">{SITE['email']}</a></p>
+        <p class="cta__alt">Or write to <a href="mailto:{SITE['email']}">{SITE['email']}</a></p>{follow}
       </div>
     </div>
   </div>
@@ -552,7 +557,7 @@ def page_index():
     </div>
   </section>
 
-  {cta_band()}
+  {cta_band(linkedin=True)}
 </main>
 ''' + footer()
 
@@ -994,6 +999,8 @@ def page_contact():
             </p>
           </div>
 
+          <div style="margin-top:28px">{linkedin_link()}</div>
+
           <div style="margin-top:44px">
             <div class="label-rule"><span class="label">Elsewhere</span></div>
             <p style="margin-bottom:16px"><a class="tlink" href="{SITE['instagram']}" target="_blank" rel="noopener">Instagram — @hexalis.in {ARROW}</a></p>
@@ -1016,6 +1023,16 @@ def page_contact():
   </section>
 </main>
 ''' + footer()
+
+
+def linkedin_link(kind="button"):
+    """Follow-on-LinkedIn call to action in one of the site's existing styles:
+    the ghost button (.btn--ghost) or the arrow text link (.tlink)."""
+    attrs = (f'href="{SITE["linkedin"]}" target="_blank" rel="noopener noreferrer" '
+             f'aria-label="Follow HEXALIS on LinkedIn (opens in a new tab)"')
+    if kind == "link":
+        return f'<a class="tlink" {attrs}>Follow us on LinkedIn {ARROW}</a>'
+    return f'<a class="btn btn--ghost" {attrs}><span>Follow us on LinkedIn</span>{ARROW}</a>'
 
 
 def careers_mailto(role_title=""):
@@ -1115,7 +1132,7 @@ def page_careers():
         <div class="span-7"><h2 class="t-lg" data-words>Every role here works across more than one pillar.</h2></div>
         <div class="span-5" style="justify-self:start">
           <p class="body-dim" style="margin-bottom:20px;max-width:40ch">Not sure which role fits? Write to us and say what you do.</p>
-          {apply_btn(ghost=True)}
+          <div style="display:flex;flex-wrap:wrap;gap:12px">{apply_btn(ghost=True)}{linkedin_link()}</div>
         </div>
       </div>
       <div class="roles">{roles}</div>
@@ -1130,7 +1147,7 @@ def page_careers():
         <p class="lede" data-rise data-d="1" style="max-width:48ch;margin-top:22px">
           Send a CV, a portfolio, or just a note about the work you want to do. Every inquiry reaches the same inbox.
         </p>
-        <div style="margin-top:34px" data-rise data-d="2">{apply_btn()}</div>
+        <div style="margin-top:34px;display:flex;flex-wrap:wrap;gap:12px" data-rise data-d="2">{apply_btn()}{linkedin_link()}</div>
       </div>
       <div class="cta__meta" data-rise data-d="2">
         <div>

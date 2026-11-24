@@ -20,7 +20,7 @@ SITE = {
     "whatsapp": "919690573335",
     "whatsapp_display": "+91 96905 73335",
     "whatsapp_message": "Hi HEXALIS, I found you through hexalis.in and would like to start a conversation about how you could help my business.",
-    "linkedin": "",
+    "linkedin": "https://www.linkedin.com/company/hexalis-in/",
     "description": (
         "HEXALIS is a six-pillar enterprise. Technology, strategy, brand growth, "
         "engagement, workplace and commerce — delivered by one accountable team "
