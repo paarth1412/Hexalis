@@ -32,8 +32,10 @@ Created by `migrations/0004_google_only_and_team.sql`:
 Names are replaced by each person's full Google name the first time they sign in.
 Set everyone's **joining date** under People: leave counts from it.
 
-Leave per calendar year: **Earned 18** (1 day for every 20 days), **Sick 7**, **Casual 7**,
-plus "Unpaid leave / absence" (no limit) for recording absence. Unused leave doesn't carry
+Leave per calendar year, built up from the joining date: **Earned 18** (1 day for every
+20 days of service), **Sick 7** and **Casual 7** (1 day for every 51 days each; set by
+`migrations/0005_cl_sl_accrual.sql`), plus "Unpaid leave / absence" (no limit) for
+recording absence. Unused leave doesn't carry
 over. All editable under Settings.
 
 ## Sign in with Google: one-time setup
@@ -110,8 +112,8 @@ can be added when going live.)
 
 ## Approval rules
 
-- Employee leave, work from home and corrections: their manager, or any admin.
-- Manager requests: admins only.
+- Leave, work from home and corrections: the person they report to (an employee's or a
+  manager's own manager), or any admin. A manager with no one above them goes to admins.
 - Admin requests: another admin, or themselves while they're the only admin.
 - Office check-ins need no approval.
 
@@ -119,7 +121,7 @@ can be added when going live.)
 
 - **Today:** check in (office or work from home), check out, month calendar, missed
   check-out reminders, and **corrections** (forgot to check in/out, wrong time, a whole
-  missing day). Corrections go through the same approval rules as leave.
+  missing day), for the last 15 days. Corrections go through the same approval rules as leave.
 - **Shift rules:** late after shift start + grace, left early, and Full day / Half day /
   Short hours from hours worked. Set under Settings → Shift and working week, along with
   the weekly days off and the idle sign-out time.

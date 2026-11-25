@@ -139,7 +139,7 @@
 
   // ---- Today ------------------------------------------------------------------------
   function greeting() { const h = +new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; }
-  const approverName = () => ME.user.role === "employee" ? (ME.user.manager ? ME.user.manager : "an admin") : "an admin";
+  const approverName = () => ME.user.role !== "admin" && ME.user.manager ? ME.user.manager : "an admin";
   const shiftLine = () => `Shift ${ME.shift.start}–${ME.shift.end}${ME.shift.grace ? ` · late after ${hhmmLate()}` : ""}`;
   const hhmmLate = () => { const m = toMin(ME.shift.start) + ME.shift.grace; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
 
@@ -217,7 +217,7 @@
     openDialog(`<h2>Correct your attendance</h2>
       <p class="dim">For a day you forgot to check in or out, or checked in at the wrong time. It goes to ${esc(approverName())} for approval.</p>
       <form data-form="correction" class="mt">
-        ${field("cd", "Date", `<input class="input" id="cd" name="date" type="date" required max="${ME.today}" min="${ME.user.since > addDaysLocal(ME.today, -60) ? ME.user.since : addDaysLocal(ME.today, -60)}" value="${esc(date || "")}">`)}
+        ${field("cd", "Date", `<input class="input" id="cd" name="date" type="date" required max="${ME.today}" min="${ME.user.since > addDaysLocal(ME.today, -15) ? ME.user.since : addDaysLocal(ME.today, -15)}" value="${esc(date || "")}"><p class="fine">Up to 15 days back.</p>`)}
         ${field("ck", "What needs correcting", `<select class="input" id="ck" name="kind">${opt("out", "Check-out time", kind)}${opt("in", "Check-in time", kind)}${opt("both", "Both (or the whole day is missing)", kind)}</select>`)}
         <div class="grid g2">
           ${field("ci", "Check-in time", `<input class="input" id="ci" name="check_in" type="time">`, `data-for="in both"`)}
@@ -338,7 +338,7 @@
         </form></section>`;
     }).join("");
     view.innerHTML = `${flashHtml()}<div class="head"><div><p class="eyebrow">Waiting for you</p><h1>Approvals</h1></div></div>
-      <p class="dim">${ME.user.role === "manager" ? "Leave, work-from-home and correction requests from the people who report to you. Your own requests go to an admin." : "Requests from managers come to admins only. Employees' requests can be decided by their manager or any admin."}</p>
+      <p class="dim">${ME.user.role === "manager" ? "Leave, work-from-home and correction requests from the people who report to you. Your own requests go to your manager or an admin." : "Everyone's requests can be decided by the person they report to or any admin. Your own requests go to another admin, or to you while you're the only admin."}</p>
       <div class="stack mt">${items || `<p class="empty">Nothing waiting. All caught up.</p>`}</div>`;
   };
 
@@ -713,6 +713,15 @@
     const fd = new FormData(f);
     const v = Object.fromEntries([...fd.entries()].filter(([, x]) => typeof x === "string"));
     const btn = e.submitter;
+    // A double click must not send the same request twice.
+    if (f.dataset.busy) return;
+    f.dataset.busy = "1";
+    const buttons = [...f.querySelectorAll("button")];
+    buttons.forEach((b) => { b.disabled = true; });
+    try { await submitForm(f, fd, v, btn); }
+    finally { delete f.dataset.busy; buttons.forEach((b) => { b.disabled = false; }); }
+  });
+  async function submitForm(f, fd, v, btn) {
     const work = { employee_code: v.employee_code, department: v.department, designation: v.designation, joining_date: v.joining_date };
     switch (f.dataset.form) {
       case "leave": {
@@ -756,7 +765,7 @@
       case "profile":
         return run(() => api("/profile", v), "Details saved.");
     }
-  });
+  }
 
   window.addEventListener("hashchange", () => go(current()));
   (async () => {

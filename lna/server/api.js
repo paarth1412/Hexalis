@@ -33,19 +33,19 @@ async function soleAdmin(env) {
 function canApproveSync(me, requester, sole) {
   if (me.id === requester.id) return me.role === "admin" && sole;
   if (me.role === "admin") return true;
-  if (me.role === "manager") return requester.role === "employee" && requester.manager_id === me.id;
+  if (me.role === "manager") return requester.role !== "admin" && requester.manager_id === me.id;
   return false;
 }
 async function canApprove(env, me, requester) {
   if (me.id === requester.id) return me.role === "admin" && (await soleAdmin(env));
   if (me.role === "admin") return true;
-  if (me.role === "manager") return requester.role === "employee" && requester.manager_id === me.id;
+  if (me.role === "manager") return requester.role !== "admin" && requester.manager_id === me.id;
   return false;
 }
-// Who hears about a new request: an employee's own manager if they have one,
-// otherwise the admins.
+// Who hears about a new request: the person they report to if they have one
+// (an employee's or a manager's own manager), otherwise the admins.
 async function approverIds(env, requester) {
-  if (requester.role === "employee" && requester.manager_id) return [requester.manager_id];
+  if (requester.role !== "admin" && requester.manager_id) return [requester.manager_id];
   const { results } = await env.DB.prepare("SELECT id FROM users WHERE role = 'admin' AND active = 1").all();
   const ids = results.map((r) => r.id).filter((id) => id !== requester.id);
   return ids.length ? ids : [requester.id];
@@ -54,12 +54,12 @@ async function approverIds(env, requester) {
 function teamFilter(me, { includeInactive = false } = {}) {
   const act = includeInactive ? "1 = 1" : "u.active = 1";
   if (me.role === "admin") return { sql: act, args: [] };
-  return { sql: `${act} AND u.role = 'employee' AND u.manager_id = ?`, args: [me.id] };
+  return { sql: `${act} AND u.role != 'admin' AND u.manager_id = ?`, args: [me.id] };
 }
 async function canSee(env, me, userId) {
   if (me.role === "admin" || me.id === userId) return true;
   const u = await env.DB.prepare("SELECT role, manager_id FROM users WHERE id = ?").bind(userId).first();
-  return Boolean(u && me.role === "manager" && u.role === "employee" && u.manager_id === me.id);
+  return Boolean(u && me.role === "manager" && u.role !== "admin" && u.manager_id === me.id);
 }
 
 // ---- calendar arithmetic -----------------------------------------------------
@@ -285,7 +285,7 @@ async function requestCorrection(env, me, body) {
   const today = todayIST();
   if (!isValidDate(date)) return bad("Pick the date to correct.");
   if (date > today) return bad("You can only correct today or earlier.");
-  if (date < addDays(today, -60)) return bad("Corrections can go back 60 days at most. Ask an admin about older records.");
+  if (date < addDays(today, -15)) return bad("Corrections can only be requested for the last 15 days. Ask an admin about older records.");
   if (date < sinceOf(me)) return bad("That's before your joining date.");
   if (!["in", "out", "both"].includes(kind)) return bad("Choose what needs correcting.");
   const reason = str(body.reason, 300);
@@ -310,9 +310,13 @@ async function requestCorrection(env, me, body) {
   if (await env.DB.prepare("SELECT id FROM corrections WHERE user_id = ? AND date = ? AND status = 'pending'").bind(me.id, date).first()) {
     return bad("You already have a correction waiting for that date.");
   }
-  await env.DB.prepare(
-    "INSERT INTO corrections (user_id, date, kind, mode, check_in_at, check_out_at, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
-  ).bind(me.id, date, kind, mode, kind === "out" ? null : inAt, kind === "in" ? null : outAt, reason, nowISO()).run();
+  // The check is repeated inside the insert, so two quick clicks can't make two requests.
+  const made = await env.DB.prepare(
+    `INSERT INTO corrections (user_id, date, kind, mode, check_in_at, check_out_at, reason, status, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', ?
+      WHERE NOT EXISTS (SELECT 1 FROM corrections WHERE user_id = ? AND date = ? AND status = 'pending') RETURNING id`
+  ).bind(me.id, date, kind, mode, kind === "out" ? null : inAt, kind === "in" ? null : outAt, reason, nowISO(), me.id, date).first();
+  if (!made) return bad("You already have a correction waiting for that date.");
   await audit(env, me.id, "correction.requested", { date, kind });
   await notify(env, await approverIds(env, me), `${me.name} asked to correct their attendance for ${fmtD(date)}.`, "approvals",
     { email: { subject: `Attendance correction to review: ${me.name}`, body: `${me.name} asked to correct their attendance for ${fmtD(date)}.\n\nReason: ${reason}` } });
@@ -396,9 +400,13 @@ async function applyLeave(env, me, body) {
   if (doc.none && type.doc_after_days !== null && days > type.doc_after_days) {
     return bad(`${type.name} of more than ${type.doc_after_days} day(s) needs a supporting document, such as a doctor's note (PDF, JPG or PNG, up to 1 MB).`);
   }
+  // The overlap check is repeated inside the insert, so two quick clicks can't make two requests.
   const res = await env.DB.prepare(
-    "INSERT INTO leaves (user_id, leave_type_id, start_date, end_date, half_day, days, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?) RETURNING id"
-  ).bind(me.id, type.id, start_date, end_date, half, days, reason, nowISO()).first();
+    `INSERT INTO leaves (user_id, leave_type_id, start_date, end_date, half_day, days, reason, status, created_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', ?
+      WHERE NOT EXISTS (SELECT 1 FROM leaves WHERE user_id = ? AND status IN ('pending','approved') AND start_date <= ? AND end_date >= ?) RETURNING id`
+  ).bind(me.id, type.id, start_date, end_date, half, days, reason, nowISO(), me.id, end_date, start_date).first();
+  if (!res) return bad("You already have leave requested for some of those dates.");
   if (!doc.none) {
     await env.DB.prepare("INSERT INTO leave_docs (leave_id, name, mime, size, data) VALUES (?, ?, ?, ?, ?)")
       .bind(res.id, doc.name, doc.mime, doc.bytes.length, doc.bytes).run();
